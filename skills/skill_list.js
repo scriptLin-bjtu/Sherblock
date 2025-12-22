@@ -1,4 +1,4 @@
 export const skill = `
-1.get_crypto_news: Get the latest news about crypto currencies.
-2.get_crypto_price: Get the price of a crypto currency.
+#get_crypto_price: Get the current price of a cryptocurrency (Bitcoin, Ethereum, etc.).#
+#edit_file: Create or edit a file with specified content. Can be used to create HTML, text, or any other file type.#
 `;

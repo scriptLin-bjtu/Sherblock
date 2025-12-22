@@ -30,7 +30,8 @@ Steps to create a plan:
 1. Analyze the user's question and identify what information is needed
 2. Check which skills from the list above can help
 3. Break down the task into sequential steps
-4. Create a plan with the following structure:
+4. IMPORTANT: Each file should be created/edited in ONE step only (don't split file creation into multiple steps)
+5. Create a plan with the following structure:
 
 Response format:
 {
@@ -72,21 +73,67 @@ Your decision logic:
 ## Step 1: Check if all steps are completed
 Count the plan array length and check current_step:
 - If current_step >= plan.length (all steps done):
+  **YOU MUST RETURN final_answer NOW!**
   Return: {"final_answer": "summarize all results and answer the original question"}
+
+IMPORTANT: When current_step >= plan.length, you MUST return final_answer, NOT step_answer!
 
 ## Step 2: Execute the current step
 If current_step < plan.length, look at plan[current_step]:
 
 ### Case A: Step has a "skill" field
 The step needs to call an external skill.
-Return: {
+Return valid JSON: {
     "skill": "exact_skill_name",
     "params": {
-        "param1": "value1"
+        "param1": "value1",
+        "param2": "value2"
     }
 }
-- Use skills_description to find the correct parameters
-- Extract parameter values from the step description or context
+
+CRITICAL RESPONSE FORMAT:
+You MUST return a JSON OBJECT (not an array!) in one of these formats:
+
+Format 1 - When using a skill:
+{
+    "skill": "skill_name",
+    "params": {
+        "param1": "value1",
+        "param2": "value2"
+    }
+}
+
+Format 2 - When answering without a skill:
+{
+    "step_answer": "your answer here"
+}
+
+Format 3 - When all steps are complete:
+{
+    "final_answer": "summary of all results"
+}
+
+CRITICAL JSON RULES FOR edit_file SKILL:
+- The "content" parameter MUST be a SINGLE-LINE string
+- Use \\n for newlines, \\" for quotes, \\\\ for backslashes
+- Keep HTML SIMPLE (under 20 lines total)
+- DO NOT include JavaScript - only HTML and CSS
+- Use inline styles or <style> tags only
+- Minify the code - remove unnecessary spaces and indentation
+
+Example for creating a simple page:
+{
+    "skill": "edit_file",
+    "params": {
+        "file_path": "/path/to/page.html",
+        "content": "<!DOCTYPE html>\\n<html>\\n<head><title>My Page</title><style>body{font-family:Arial;text-align:center;padding:50px;background:#f0f0f0;}h1{color:#4682b4;margin:20px 0;}p{font-size:1.1em;color:#333;}</style></head>\\n<body>\\n<h1>Welcome</h1>\\n<p>This is a simple page.</p>\\n</body>\\n</html>"
+    }
+}
+
+CRITICAL:
+- Return a JSON OBJECT, NOT an array
+- The entire "content" value must be ONE continuous string with NO line breaks
+- Only use \\n escape sequences for newlines
 
 ### Case B: Step has NO "skill" field
 This is a reasoning/summary step.
