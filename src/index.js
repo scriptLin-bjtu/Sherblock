@@ -1,5 +1,5 @@
 import { run } from "./agent.js";
 
 run(
-    "check the price of bitcoin and ethereum and then give me some advice (use plan mode)"
+    "Hello,How are you today? Can you tell me what the price of bitcoin and ethereum today?"
 );

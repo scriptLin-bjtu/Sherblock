@@ -3,6 +3,7 @@ import "dotenv/config";
 (async () => {
     //console.log(process.env.BIGMODEL_API_KEY);
     const result = await callBigModelVision({
+        mode: "plan",
         apiKey: process.env.BIGMODEL_API_KEY,
         text: `hello,How are you today?`,
     });

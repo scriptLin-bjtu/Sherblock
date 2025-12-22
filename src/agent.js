@@ -7,9 +7,14 @@ import { spawn } from "node:child_process";
  * @param {string} params.text - 用户文本问题
  * @returns {Promise<Object>} 接口返回结果
  */
-import { systemPrompt } from "./system_prompt.js";
+import { systemPlanPrompt, systemExecutePrompt } from "./system_prompt.js";
 import "dotenv/config";
-export async function callBigModelVision({ apiKey, text, imageUrl = null }) {
+export async function callBigModelVision({
+    mode,
+    apiKey,
+    text,
+    imageUrl = null,
+}) {
     const url = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
 
     const body = {
@@ -17,7 +22,8 @@ export async function callBigModelVision({ apiKey, text, imageUrl = null }) {
         messages: [
             {
                 role: "system",
-                content: systemPrompt,
+                content:
+                    mode == "plan" ? systemPlanPrompt : systemExecutePrompt,
             },
             {
                 role: "user",
@@ -93,6 +99,7 @@ export async function run(text) {
     //初始问题
     const result = JSON.parse(
         await callBigModelVision({
+            mode: "plan",
             apiKey: process.env.BIGMODEL_API_KEY,
             text,
         })
@@ -121,14 +128,22 @@ export async function run(text) {
         //动态加载需要的技能描述
         PlanObj.skills_description = skills_description;
         console.log("plan:", PlanObj);
-        do {
+        while (true) {
             step_result = JSON.parse(
                 await callBigModelVision({
+                    mode: "execute",
                     apiKey: process.env.BIGMODEL_API_KEY,
                     text: JSON.stringify(PlanObj),
                 })
             );
             console.log("step result:", step_result);
+
+            // Check for final answer first
+            if (step_result.final_answer) {
+                console.log("final answer:", step_result.final_answer);
+                return;
+            }
+
             if (step_result.step_answer) {
                 PlanObj.plan[PlanObj.current_step].result =
                     step_result.step_answer;
@@ -141,12 +156,8 @@ export async function run(text) {
                 );
                 PlanObj.current_step++;
             }
-            if (step_result.final_answer) {
-                console.log("final answer:", step_result.final_answer);
-                return;
-            }
             console.log("plan:", PlanObj);
-        } while (PlanObj.current_step < PlanObj.plan.length);
+        }
     } else {
         console.log("error response by LLM");
         return;
