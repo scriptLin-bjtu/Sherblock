@@ -1,3 +1,12 @@
-import { run } from "./agent.js";
+import { callLLM } from "./services/agent.js";
 
-run("Please help me create a 贪吃蛇游戏 in /path/to/file.html (Use Plan Mode)");
+import { QuestionAgent } from "./agents/questionBot/agent.js";
+// console.log(
+//     await callLLM({
+//         systemPrompt: systemPrompt.prompt1,
+//         apiKey: process.env.BIGMODEL_API_KEY,
+//         text: `你好吗，不许回答不知道`,
+//     })
+// );
+const questionAgent = new QuestionAgent(callLLM);
+questionAgent.run();

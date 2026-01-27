@@ -1,37 +1,20 @@
-import { callBigModelVision } from "./agent.js";
-import "dotenv/config";
-(async () => {
-    //console.log(process.env.BIGMODEL_API_KEY);
-    const result = await callBigModelVision({
-        mode: "plan",
-        apiKey: process.env.BIGMODEL_API_KEY,
-        text: `hello,How are you today?`,
-    });
+import readline from "node:readline";
+import { Readable } from "node:stream";
 
-    console.log(result);
-})();
+const input = new Readable({
+    read() {},
+});
 
-//Please check the Bitcoin price and crypto news today and give me some advice.
+const rl = readline.createInterface({
+    input,
+    output: process.stdout,
+});
 
-/*
-{
-  mode: 'plan',
-  plan: [
-    {
-      step: 'Get the current Bitcoin price',
-      result: null,
-      skill: 'get_crypto_price'
-    },
-    {
-      step: 'Get the latest crypto news',
-      result: null,
-      skill: 'get_crypto_news'
-    },
-    {
-      step: 'Analyze the information and provide investment advice',
-      result: null
-    }
-  ],
-  current_step: 0
-}
-*/
+rl.on("line", (line) => {
+    console.log("收到:", line);
+});
+
+// 模拟输入
+input.push("第一句\n");
+input.push("第二句\n");
+input.push(null);
