@@ -33,25 +33,49 @@ export async function callLLM({ systemPrompt, apiKey, user_messages }) {
         },
     };
 
-    const res = await fetch(url, {
-        method: "POST",
-        headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-    });
+    const maxRetries = 3;
+    let lastError;
 
-    if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`BigModel API Error: ${res.status} ${errText}`);
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60秒超时
+
+            const res = await fetch(url, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${apiKey}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(body),
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`BigModel API Error: ${res.status} ${errText}`);
+            }
+            const resJson = await res.json();
+            let content = resJson.choices[0].message.content;
+            // 清理 markdown 代码块标记（如 ```json ... ```）
+            content = content
+                .replace(/^```(?:json)?\s*/i, "")
+                .replace(/\s*```$/i, "")
+                .trim();
+            return JSON.parse(content);
+        } catch (error) {
+            lastError = error;
+            console.log(
+                `API 请求失败 (尝试 ${attempt}/${maxRetries}):`,
+                error.message
+            );
+            if (attempt < maxRetries) {
+                console.log(`等待 2 秒后重试...`);
+                await new Promise((resolve) => setTimeout(resolve, 2000));
+            }
+        }
     }
-    const resJson = await res.json();
-    let content = resJson.choices[0].message.content;
-    // 清理 markdown 代码块标记（如 ```json ... ```）
-    content = content
-        .replace(/^```(?:json)?\s*/i, "")
-        .replace(/\s*```$/i, "")
-        .trim();
-    return JSON.parse(content);
+    throw lastError;
 }
