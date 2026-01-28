@@ -13,8 +13,10 @@ export class QuestionAgent {
             input: process.stdin,
             output: process.stdout,
         });
-        this.messages = [];
+        // ReAct 模式：只保存对话历史摘要，不传递完整消息
+        this.conversationHistory = [];
     }
+
     getinfos() {
         return this.infos;
     }
@@ -24,103 +26,123 @@ export class QuestionAgent {
         return Object.values(this.infos).some((v) => v === null);
     }
 
-    // 处理 LLM 响应的核心逻辑
-    async processLLMResponse() {
-        const res = await this.callLLM({
-            systemPrompt: prompt(this.infos),
-            apiKey: process.env.BIGMODEL_API_KEY,
-            user_messages: this.messages,
-        });
-        // 调试：打印 LLM 返回的原始结果
-        console.log("LLM 返回:", JSON.stringify(res, null, 2));
+    // 检查信息是否足够丰富（不只是非空，还要有足够的内容）
+    isInfoRichEnough() {
+        if (this.hasNullInfos()) return false;
 
-        if (res.state_code === 1) {
-            console.log("问答模块继续提问:", res.questions);
-            this.messages.push({
-                type: "text",
-                text: "提问:" + res.questions,
-            });
-            console.log("请输入你的回答:");
-            // 等待用户输入，不做其他操作
-        } else if (res.state_code === 2) {
-            // 深度合并，避免覆盖嵌套对象中的已有字段
-            for (const key of Object.keys(res.changes)) {
-                if (
-                    this.infos[key] !== null &&
-                    typeof this.infos[key] === "object" &&
-                    typeof res.changes[key] === "object"
-                ) {
-                    // 合并嵌套对象
-                    this.infos[key] = {
-                        ...this.infos[key],
-                        ...res.changes[key],
-                    };
-                } else {
-                    this.infos[key] = res.changes[key];
-                }
-            }
-            console.log("问答模块更新信息:", this.infos);
-            this.messages.push({
-                type: "text",
-                text: "更新信息:" + JSON.stringify(res.changes),
-            });
-            // 自动添加一条消息并继续处理
-            this.messages.push({
-                type: "text",
-                text: "请继续更新信息直到有需要用户确认的地方",
-            });
-            // 添加延迟避免 API 限流
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            // 递归调用，继续处理
-            await this.processLLMResponse();
-        } else if (res.state_code === 0) {
-            // 如果 state_code=0 但带了 changes，先应用这些更新
-            if (res.changes) {
-                for (const key of Object.keys(res.changes)) {
-                    if (
-                        this.infos[key] !== null &&
-                        typeof this.infos[key] === "object" &&
-                        typeof res.changes[key] === "object"
-                    ) {
-                        this.infos[key] = {
-                            ...this.infos[key],
-                            ...res.changes[key],
-                        };
-                    } else {
-                        this.infos[key] = res.changes[key];
-                    }
-                }
-                console.log("问答模块更新信息:", this.infos);
-            }
+        // 检查 basic_infos 是否有必要字段
+        const basicInfos = this.infos.basic_infos;
+        if (!basicInfos.chain || !basicInfos.tx_hash) return false;
 
-            // 检查是否还有未填充的信息
-            if (this.hasNullInfos()) {
-                const nullFields = Object.entries(this.infos)
-                    .filter(([_, v]) => v === null)
-                    .map(([k]) => k);
-                console.log(
-                    `警告：信息不完整，缺少字段: ${nullFields.join(", ")}`
-                );
-                this.messages.push({
-                    type: "text",
-                    text: `信息不完整，以下字段还是 null: ${nullFields.join(
-                        ", "
-                    )}。请根据之前的对话内容，使用 state_code=2 逐个更新这些字段。`,
-                });
-                // 添加延迟避免 API 限流
-                await new Promise((resolve) => setTimeout(resolve, 1000));
-                // 递归调用，强制继续
-                await this.processLLMResponse();
+        // 检查 goal 是否有必要字段
+        const goal = this.infos.goal;
+        if (!goal.analysis_type || !goal.depth) return false;
+
+        return true;
+    }
+
+    // 深度合并对象
+    mergeChanges(changes) {
+        for (const key of Object.keys(changes)) {
+            if (
+                this.infos[key] !== null &&
+                typeof this.infos[key] === "object" &&
+                typeof changes[key] === "object"
+            ) {
+                this.infos[key] = { ...this.infos[key], ...changes[key] };
             } else {
-                this.rl.close();
-                console.log("问答模块结束");
-                console.log("问答模块返回的信息:", this.infos);
+                this.infos[key] = changes[key];
             }
         }
     }
 
+    // ReAct 核心循环
+    async react(observation) {
+        // 添加观察到历史
+        this.conversationHistory.push({
+            role: "observation",
+            content: observation,
+        });
+
+        // 调用 LLM，只传递当前状态和最新观察
+        const res = await this.callLLM({
+            systemPrompt: prompt(this.infos, this.conversationHistory),
+            apiKey: process.env.DEEPSEEK_API_KEY,
+            user_messages: [{ type: "text", text: observation }],
+            modelProvider: "deepseek",
+        });
+
+        console.log("Thought & Action:", JSON.stringify(res, null, 2));
+
+        // 记录 LLM 的思考和动作
+        this.conversationHistory.push({ role: "action", content: res });
+
+        // 执行动作
+        return await this.executeAction(res);
+    }
+
+    // 执行 LLM 返回的动作
+    async executeAction(action) {
+        switch (action.action_type) {
+            case "ASK":
+                // 向用户提问
+                console.log("问题:", action.question);
+                console.log("请输入你的回答:");
+                return "WAIT_USER"; // 等待用户输入
+
+            case "UPDATE":
+                // 更新信息
+                this.mergeChanges(action.changes);
+                console.log("更新信息:", JSON.stringify(this.infos, null, 2));
+                // 继续 ReAct 循环
+                await new Promise((r) => setTimeout(r, 500));
+                return await this.react(
+                    `信息已更新。当前状态: ${JSON.stringify(this.infos)}`
+                );
+
+            case "FINISH":
+                // 检查是否完整
+                if (this.hasNullInfos()) {
+                    const nullFields = Object.keys(this.infos).filter(
+                        (k) => this.infos[k] === null
+                    );
+                    console.log(
+                        `⚠️ 信息不完整，缺少: ${nullFields.join(", ")}`
+                    );
+                    await new Promise((r) => setTimeout(r, 500));
+                    return await this.react(
+                        `无法结束，以下字段仍为空: ${nullFields.join(
+                            ", "
+                        )}。请使用 UPDATE 动作填充，或使用 ASK 向用户询问。`
+                    );
+                }
+                // 检查信息是否足够丰富
+                if (!this.isInfoRichEnough()) {
+                    console.log("⚠️ 信息不够丰富，需要更多上下文");
+                    await new Promise((r) => setTimeout(r, 500));
+                    return await this.react(
+                        `信息不够丰富。请使用 ASK 向用户询问更多上下文，如：用户是如何发现这笔交易的？有什么怀疑？希望重点关注什么？`
+                    );
+                }
+                // 完成
+                console.log("✅ 信息收集完成");
+                console.log(
+                    "📋 最终结果:",
+                    JSON.stringify(this.infos, null, 2)
+                );
+                this.rl.close();
+                return "DONE";
+
+            default:
+                console.log("未知动作:", action.action_type);
+                return await this.react(
+                    "未知动作，请使用 ASK、UPDATE 或 FINISH"
+                );
+        }
+    }
+
     async run() {
-        console.log("问答模块启动");
+        console.log("问答模块启动 (ReAct 模式)");
         console.log("请输入你的问题：");
 
         this.rl.on("line", async (input) => {
@@ -128,11 +150,7 @@ export class QuestionAgent {
                 this.rl.close();
                 return;
             }
-            this.messages.push({
-                type: "text",
-                text: input,
-            });
-            await this.processLLMResponse();
+            await this.react(`用户输入: ${input}`);
         });
 
         this.rl.on("close", () => {
