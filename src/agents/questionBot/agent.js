@@ -32,7 +32,9 @@ export class QuestionAgent {
 
         // 检查 basic_infos 是否有必要字段
         const basicInfos = this.infos.basic_infos;
-        if (!basicInfos.chain || !basicInfos.tx_hash) return false;
+        // 必须有 chain，且 tx_hash 或 address 至少有一个
+        if (!basicInfos.chain) return false;
+        if (!basicInfos.tx_hash && !basicInfos.address) return false;
 
         // 检查 goal 是否有必要字段
         const goal = this.infos.goal;
@@ -74,11 +76,14 @@ export class QuestionAgent {
 
         console.log("Thought & Action:", JSON.stringify(res, null, 2));
 
+        // 提取解析后的动作数据
+        const action = res.data || res;
+
         // 记录 LLM 的思考和动作
-        this.conversationHistory.push({ role: "action", content: res });
+        this.conversationHistory.push({ role: "action", content: action });
 
         // 执行动作
-        return await this.executeAction(res);
+        return await this.executeAction(action);
     }
 
     // 执行 LLM 返回的动作
@@ -159,3 +164,33 @@ export class QuestionAgent {
         });
     }
 }
+
+/*
+{
+  "user_questions": "What is the specific purpose and behavioral motivation behind the transaction with hash 0xcbc154bd8f000b5e0234e8dd725ae024007e6a1ec79663e0f1b594a83bced4be on Polygon? The user knows it involves a call to UMA's OOV2 contract but wants to understand the intent behind calling that specific function.",    
+  "goal": {
+    "analysis_type": "behavioral motivation analysis",
+    "depth": "simple report focusing on this transaction's intent and context",
+    "expected_output": "a simple report explaining the transaction's purpose and the caller's motivation",  
+    "focus_points": [
+      "Decode and explain the specific UMA OOV2 contract function called",
+      "Analyze the intent behind calling that function (e.g., price request, governance, etc.)",
+      "Contextualize the transaction within typical address behavior if possible"
+    ],
+    "constraints": null
+  },
+  "basic_infos": {
+    "chain": "polygon",
+    "tx_hash": "0xcbc154bd8f000b5e0234e8dd725ae024007e6a1ec79663e0f1b594a83bced4be",
+    "context": {
+      "user_role": "third-party observer",
+      "discovery_source": "noticed randomly on-chain",
+      "suspicion": "looks like a usual activity for the address, no specific suspicion",
+      "known_info": "The transaction is a call to UMA's OOV2 contract. The address's behavior appears typical for it.",
+      "urgency": "urgent, generate as soon as possible"
+    },
+    "related_addresses": [],
+    "time_range": null
+  }
+}
+*/
