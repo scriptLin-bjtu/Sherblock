@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(node:*)",
+      "Bash(npm --version:*)",
+      "Bash(openspec new:*)",
+      "Bash(openspec status:*)",
+      "Bash(openspec instructions:*)",
+      "WebFetch(domain:docs.etherscan.io)",
+      "Bash(grep:*)",
+      "Bash(done:*)"
+    ]
+  }
+}

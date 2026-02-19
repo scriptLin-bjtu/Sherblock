@@ -132,13 +132,13 @@ const executeAgent = new ExecuteAgent(callLLM);
 // This demonstrates how to run one step from the plan
 
 const exampleScope = {
-    address: "0xB23d9Af50ff1a269Ec0a3De6FefdE0B4627a8338",
+    address: "0x7C7c7bDACC15A41Eb564D0eFF5164E5AB33d5ec7",
     chain: "polygon",
-    analysis_period: "last_30_days",
+    analysis_period: "last_7_days",
     recent_transactions: null,
     basic_infos: {
         chain: "polygon",
-        address: "0xB23d9Af50ff1a269Ec0a3De6FefdE0B4627a8338",
+        address: "0x7C7c7bDACC15A41Eb564D0eFF5164E5AB33d5ec7",
     },
 };
 

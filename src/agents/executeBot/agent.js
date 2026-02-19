@@ -1,12 +1,5 @@
-import { prompt, formatObservation } from "./prompt.js";
-import { SKILLS, buildSkillUrl, SUPPORTED_CHAINS } from "./skills.js";
-import { ProxyAgent } from "undici";
-
-/**
- * 本地代理配置
- */
-const PROXY_HOST = process.env.HTTP_PROXY || "http://127.0.0.1:7890";
-const proxyAgent = new ProxyAgent(PROXY_HOST);
+import { prompt } from "./prompt.js";
+import { SkillRegistry, SUPPORTED_CHAINS } from "./skills/index.js";
 
 /**
  * ExecuteAgent - Executes individual steps from the analysis plan
@@ -18,9 +11,17 @@ export class ExecuteAgent {
         this.scope = null;
         this.currentStep = null;
         this.executionHistory = [];
-        this.maxIterations = 20; // Safety limit
+        this.maxIterations = 20;
         this.retryCount = 0;
         this.maxRetries = 3;
+        this.skillRegistry = new SkillRegistry();
+        this.initialized = false;
+    }
+
+    async initialize() {
+        if (this.initialized) return;
+        await this.skillRegistry.initialize();
+        this.initialized = true;
     }
 
     /**
@@ -68,7 +69,13 @@ export class ExecuteAgent {
      * Execute a blockchain analysis skill via Etherscan API
      */
     async executeSkill(skillName, params, chainId) {
-        const skill = SKILLS[skillName];
+        // Ensure initialized
+        if (!this.initialized) {
+            await this.initialize();
+        }
+
+        // Get skill from registry
+        const skill = this.skillRegistry.getSkill(skillName);
         if (!skill) {
             return {
                 success: false,
@@ -77,35 +84,27 @@ export class ExecuteAgent {
         }
 
         // Validate required parameters
-        const missingParams = skill.params.required.filter(
-            (p) => !params[p] && params[p] !== 0
-        );
-        if (missingParams.length > 0) {
+        const validation = this.skillRegistry.validateParameters(skillName, params);
+        if (!validation.valid) {
             return {
                 success: false,
-                error: `Missing required parameters: ${missingParams.join(
-                    ", "
-                )}`,
+                error: validation.error,
             };
         }
 
         try {
-            const url = buildSkillUrl(
-                skillName,
-                params,
-                chainId || this.getChainId(),
-                this.getApiKey()
-            );
-
             console.log(`[ExecuteAgent] Calling: ${skillName}`);
 
-            const response = await fetch(url, {
-                dispatcher: proxyAgent, // 使用本地代理
-                signal: AbortSignal.timeout(30000), // 30秒超时
+            // Execute the skill
+            const result = await skill.skill.execute(params, {
+                apiKey: this.getApiKey(),
+                chainId: chainId || this.getChainId(),
             });
-            const result = await response.json();
 
-            return formatObservation(result, skillName);
+            // Add small delay to avoid rate limiting
+            await new Promise((r) => setTimeout(r, 300));
+
+            return result;
         } catch (error) {
             console.error(`[ExecuteAgent] Skill error:`, error.message);
             return {

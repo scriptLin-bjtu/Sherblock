@@ -1,4 +1,18 @@
-import { getSkillsDocumentation, SUPPORTED_CHAINS } from "./skills.js";
+import { SkillRegistry, SUPPORTED_CHAINS } from "./skills/index.js";
+
+// Skill registry for generating documentation
+const skillRegistry = new SkillRegistry();
+let skillsDocCache = null;
+
+function getSkillsDocumentation() {
+    if (skillsDocCache) return skillsDocCache;
+    if (!skillRegistry.initialized) {
+        // Return basic docs if not initialized
+        return "Skills documentation available after registry initialization.";
+    }
+    skillsDocCache = skillRegistry.generateDocumentation();
+    return skillsDocCache;
+}
 
 /**
  * Generate the system prompt for ExecuteAgent
