@@ -9,6 +9,8 @@ import {
     callEtherscanApi,
     formatResult,
     formatError,
+    normalizeParams,
+    compressResponse,
 } from "../../lib/etherscan-client.js";
 
 export default {
@@ -37,6 +39,9 @@ export default {
     ],
 
     async execute(params, context) {
+        // Normalize parameter names (handle common LLM mistakes)
+        const normalizedParams = normalizeParams(params);
+
         const {
             address,
             contractaddress,
@@ -45,7 +50,7 @@ export default {
             page,
             offset,
             sort = "desc",
-        } = params;
+        } = normalizedParams;
         const { apiKey, chainId = "1" } = context;
 
         try {
@@ -70,7 +75,20 @@ export default {
 
             const data = await callEtherscanApi(url);
 
-            return formatResult(data, this.name);
+            // Compress the result to prevent context overflow
+            const compressedResult = compressResponse(data.result, 500);
+
+            return {
+                type: "OBSERVATION",
+                content: {
+                    skill: this.name,
+                    success: true,
+                    data: compressedResult,
+                    note: Array.isArray(data.result) && data.result.length > 50
+                        ? `Showing ${data.result.length} transfers`
+                        : undefined,
+                },
+            };
         } catch (error) {
             return formatError(error, this.name);
         }

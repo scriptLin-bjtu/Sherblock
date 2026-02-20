@@ -22,20 +22,38 @@ function getSkillsDocumentation() {
  * @returns {string} - The system prompt
  */
 export function prompt(scope, currentStep, executionHistory = []) {
-    // Format execution history
+    // Format execution history with truncation to prevent context overflow
+    const MAX_CONTENT_LENGTH = 1500; // Max chars per history entry
+    const MAX_HISTORY_ENTRIES = 15; // Max number of history entries to include
+
+    const truncatedHistory = executionHistory.slice(-MAX_HISTORY_ENTRIES);
+
     const historyStr =
-        executionHistory.length > 0
-            ? executionHistory
-                  .map(
-                      (h, i) =>
-                          `${i + 1}. [${h.type}] ${
-                              typeof h.content === "string"
-                                  ? h.content
-                                  : JSON.stringify(h.content, null, 2)
-                          }`
-                  )
+        truncatedHistory.length > 0
+            ? truncatedHistory
+                  .map((h, i) => {
+                      let contentStr =
+                          typeof h.content === "string"
+                              ? h.content
+                              : JSON.stringify(h.content, null, 2);
+
+                      // Truncate if too long
+                      if (contentStr.length > MAX_CONTENT_LENGTH) {
+                          contentStr =
+                              contentStr.substring(0, MAX_CONTENT_LENGTH) +
+                              `...[truncated, total ${contentStr.length} chars]`;
+                      }
+
+                      return `${i + 1}. [${h.type}] ${contentStr}`;
+                  })
                   .join("\n\n")
             : "(no previous actions)";
+
+    // Add note if history was truncated
+    const historyNote =
+        executionHistory.length > MAX_HISTORY_ENTRIES
+            ? `\n[Note: History truncated from ${executionHistory.length} to ${MAX_HISTORY_ENTRIES} most recent entries]`
+            : "";
 
     // Get skills documentation
     const skillsDoc = getSkillsDocumentation();
@@ -63,7 +81,7 @@ ${JSON.stringify(scope, null, 2)}
 ${JSON.stringify(currentStep, null, 2)}
 
 # Execution History
-${historyStr}
+${historyStr}${historyNote}
 
 # Supported Chains
 ${chainsDoc}
@@ -93,6 +111,12 @@ Use this to query blockchain data via Etherscan API.
 - skill_name: Name of the skill from the available skills
 - params: Object with required parameters for the skill
 - chain_id: (optional) Chain ID to query, defaults to scope's chain
+
+**IMPORTANT - Parameter Naming:**
+Use EXACT parameter names as documented for each skill:
+- Block range: "startblock", "endblock" (NOT "start_block", "startBlock", etc.)
+- Pagination: "offset" for number of items per page (NOT "limit")
+- Always check skill documentation for correct parameter names
 
 ## 2. UPDATE_SCOPE — Update the analysis scope with findings
 Use this to record important discoveries that should persist.

@@ -77,9 +77,16 @@ export class ExecuteAgent {
         // Get skill from registry
         const skill = this.skillRegistry.getSkill(skillName);
         if (!skill) {
+            // List available skills to help debug
+            const availableSkills = this.skillRegistry.listSkills().slice(0, 20).map(s => s.name).join(", ");
             return {
-                success: false,
-                error: `Unknown skill: ${skillName}`,
+                type: "OBSERVATION",
+                content: {
+                    skill: skillName,
+                    success: false,
+                    error: `Unknown skill: "${skillName}". Available skills include: ${availableSkills}...`,
+                    available_skills: this.skillRegistry.listSkills().map(s => s.name),
+                },
             };
         }
 
@@ -104,7 +111,26 @@ export class ExecuteAgent {
             // Add small delay to avoid rate limiting
             await new Promise((r) => setTimeout(r, 300));
 
-            return result;
+            // Ensure result has the expected format
+            if (result && result.type === "OBSERVATION" && result.content) {
+                return result;
+            } else if (result && result.content) {
+                // Wrap in expected format if needed
+                return {
+                    type: "OBSERVATION",
+                    content: result.content,
+                };
+            } else {
+                return {
+                    type: "OBSERVATION",
+                    content: {
+                        skill: skillName,
+                        success: false,
+                        error: "Unexpected result format from skill",
+                        result,
+                    },
+                };
+            }
         } catch (error) {
             console.error(`[ExecuteAgent] Skill error:`, error.message);
             return {
@@ -143,11 +169,24 @@ Constraints: ${JSON.stringify(currentStep.constraints || "none")}`;
      * ReAct core loop - Reasoning + Acting
      */
     async react(observation) {
-        // Add observation to history
-        this.executionHistory.push({
-            type: "OBSERVATION",
-            content: observation,
-        });
+        // Filter out observations with undefined or null content (failed skill lookups)
+        if (observation === undefined || observation === null) {
+            console.log("[ExecuteAgent] Skipping undefined/null observation");
+            // Continue with history as-is
+        } else {
+            // Add observation to history
+            this.executionHistory.push({
+                type: "OBSERVATION",
+                content: observation,
+            });
+        }
+
+        // Limit history size to prevent context overflow (keep last 20 entries)
+        const MAX_HISTORY_SIZE = 20;
+        if (this.executionHistory.length > MAX_HISTORY_SIZE) {
+            console.log(`[ExecuteAgent] Truncating history from ${this.executionHistory.length} to ${MAX_HISTORY_SIZE} entries`);
+            this.executionHistory = this.executionHistory.slice(-MAX_HISTORY_SIZE);
+        }
 
         // Safety check for max iterations
         if (this.executionHistory.length > this.maxIterations * 2) {
@@ -215,13 +254,16 @@ Constraints: ${JSON.stringify(currentStep.constraints || "none")}`;
                 await new Promise((r) => setTimeout(r, 300));
 
                 // Continue ReAct loop with observation
-                return await this.react(
-                    `Skill ${skill_name} result:\n${JSON.stringify(
-                        result.content,
-                        null,
-                        2
-                    )}`
-                );
+                // Truncate if too long to prevent context overflow
+                const MAX_OBSERVATION_LENGTH = 8000;
+                let resultStr = JSON.stringify(result.content, null, 2);
+                if (resultStr.length > MAX_OBSERVATION_LENGTH) {
+                    resultStr =
+                        resultStr.substring(0, MAX_OBSERVATION_LENGTH) +
+                        `\n...[truncated, total ${resultStr.length} chars]`;
+                }
+
+                return await this.react(`Skill ${skill_name} result:\n${resultStr}`);
             }
 
             case "UPDATE_SCOPE": {
