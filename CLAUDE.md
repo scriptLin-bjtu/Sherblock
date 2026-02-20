@@ -4,11 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a **Blockchain Transaction Behavior Analysis Agent** - a multi-agent system for analyzing blockchain transactions and addresses. It uses a Plan-and-Execute architecture with three specialized agents:
+This is a **Blockchain Transaction Behavior Analysis Agent** - a multi-agent system for analyzing blockchain transactions and addresses. It uses a Plan-and-Execute architecture with three specialized agents coordinated by a central orchestrator:
 
 1. **QuestionAgent** (`src/agents/questionBot/`) - Interactive information collection using ReAct pattern
 2. **PlanAgent** (`src/agents/planBot/`) - Strategic planning using deepseek-reasoner model
 3. **ExecuteAgent** (`src/agents/executeBot/`) - Step execution using ReAct pattern with blockchain skills
+4. **AgentOrchestrator** (`src/agents/orchestrator/`) - Central coordinator managing workflow state transitions
 
 ## Architecture
 
@@ -20,14 +21,22 @@ User Input → QuestionAgent → PlanAgent → ExecuteAgent (per step)
                                          Blockchain Data
 ```
 
+**Workflow Stages** (managed by `WorkflowStateMachine`):
+- `IDLE` → `COLLECTING` → `PLANNING` → `EXECUTING` → `REVIEWING` → `COMPLETED`
+
+### Agent Components
+
 - **QuestionAgent**: Uses ReAct (Thought → Action → Observation) to collect user requirements through interactive questioning. Stores data in `infos` object with `user_questions`, `goal`, and `basic_infos`.
-
-- **PlanAgent**: Takes collected information and generates a structured analysis plan with `scope` (state variables) and `steps` (execution steps). Uses DeepSeek Reasoner for complex reasoning.
-
+- **PlanAgent**: Takes collected information and generates a structured analysis plan with `scope` (state variables) and `steps` (execution steps). Uses DeepSeek Reasoner for complex reasoning. Also handles step review and plan adjustment.
 - **ExecuteAgent**: Executes individual steps from the plan. Uses ReAct loop with three action types:
   - `USE_SKILL`: Call blockchain analysis skills (Etherscan API)
   - `UPDATE_SCOPE`: Update findings to shared state
   - `FINISH`: Complete the step
+- **AgentOrchestrator**: Central coordinator that:
+  - Manages state transitions with transition guards
+  - Emits events for workflow monitoring
+  - Handles execution with review loop
+  - Supports pause/resume/stop control
 
 ### LLM Service (`src/services/agent.js`)
 
@@ -36,9 +45,9 @@ Unified interface for multiple LLM providers:
 - **DeepSeek**: `deepseek-chat`, standard chat model
 - **DeepSeek Reasoner**: `deepseek-reasoner`, deep thinking mode (no temperature/top_p support)
 
-### Blockchain Skills (`src/agents/executeBot/skills.js`)
+### Blockchain Skills (`src/agents/executeBot/skills/`)
 
-Etherscan V2 API wrapper with 20+ skills organized by category:
+Modular skill system with 20+ skills organized by category. Each skill is a separate module in `[category]/[skill]/index.js`:
 - **Account**: Balance, transactions, internal transactions, token transfers
 - **Contract**: ABI, source code, creator
 - **Transaction**: Receipt status, internal tx by hash
@@ -46,6 +55,11 @@ Etherscan V2 API wrapper with 20+ skills organized by category:
 - **Proxy**: ETH RPC methods (block number, get block/tx, etc.)
 - **Logs**: Event logs
 - **Stats**: ETH price, supply
+
+**Skill Registry** (`src/agents/executeBot/skills/index.js`): Dynamically loads skills from filesystem. Each skill exports an object with:
+- `name`, `description`, `category`, `params` (required/optional)
+- `whenToUse` (array of scenarios)
+- `execute(params, context)` async function
 
 Supported chains: Ethereum, Polygon, BSC, Arbitrum, Optimism, Base, Avalanche, and more.
 
@@ -55,7 +69,7 @@ Supported chains: Ethereum, Polygon, BSC, Arbitrum, Optimism, Base, Avalanche, a
 # Install dependencies
 npm install
 
-# Run the main application
+# Run the main application (interactive mode)
 npm start
 # or
 node src/index.js
@@ -89,26 +103,44 @@ src/
     ├── planBot/
     │   ├── agent.js           # PlanAgent - strategic planning
     │   └── prompt.js          # Prompt for plan generation with scope/steps
-    └── executeBot/
-        ├── agent.js           # ExecuteAgent - step execution with ReAct
-        ├── prompt.js          # ReAct prompt with USE_SKILL/UPDATE_SCOPE/FINISH
-        └── skills.js          # Etherscan API skills and utilities
+    ├── executeBot/
+    │   ├── agent.js           # ExecuteAgent - step execution with ReAct
+    │   ├── prompt.js          # ReAct prompt with USE_SKILL/UPDATE_SCOPE/FINISH
+    │   └── skills/            # Modular skill system
+    │       ├── index.js       # Skill registry and loader
+    │       └── [category]/[skill]/index.js
+    └── orchestrator/
+        ├── index.js           # AgentOrchestrator - central coordinator
+        ├── events.js          # EventBus implementation
+        └── state-machine.js   # Workflow state management with guards
 ```
 
 ## Important Implementation Details
 
-1. **Proxy Configuration**: The codebase uses a local proxy (`http://127.0.0.1:7890`) for all external API calls (Etherscan, LLM providers). This is configured in `skills.js` and `agent.js` using `undici`'s `ProxyAgent`.
+1. **Proxy Configuration**: All external API calls (Etherscan, LLM providers) use a proxy configured via `HTTP_PROXY` env var (defaults to `http://127.0.0.1:7890`). Uses `undici`'s ProxyAgent.
 
-2. **ReAct Pattern**: Both QuestionAgent and ExecuteAgent use the ReAct (Reasoning + Acting) pattern. They call the LLM with current state, get back a structured action (ASK/UPDATE/FINISH or USE_SKILL/UPDATE_SCOPE/FINISH), execute it, and feed the observation back into the loop.
+2. **ReAct Pattern**: Both QuestionAgent and ExecuteAgent use ReAct (Reasoning + Acting) pattern. They call LLM with current state, get back a structured action, execute it, and feed observation back into the loop.
 
 3. **State Management**:
    - QuestionAgent maintains `infos` object with `user_questions`, `goal`, `basic_infos`
    - PlanAgent generates a plan with `scope` (shared state) and `steps`
    - ExecuteAgent updates `scope` during execution via `UPDATE_SCOPE` actions
+   - WorkflowStateMachine enforces state transitions with guards
 
-4. **Skill System**: Skills are declarative definitions in `skills.js` that map to Etherscan API endpoints. Each skill specifies required/optional params, expected output, and when to use. The `buildSkillUrl` function constructs the actual API URL.
+4. **Skill System**: Skills are modular and loaded dynamically. Each skill is a self-contained module that:
+   - Defines its interface (name, params, when to use)
+   - Implements parameter normalization (handles common LLM naming mistakes)
+   - Calls Etherscan API with proxy and rate limiting
+   - Compresses large responses to prevent context overflow
 
-5. **LLM Provider Differences**: The `callLLM` function handles provider-specific request/response formats:
+5. **LLM Provider Differences**: The `callLLM` function handles provider-specific formats:
    - GLM supports `thinking` mode
    - DeepSeek Reasoner has limited params (no temperature), returns `reasoning_content` separately
-   - All providers use the same base message format but different endpoint URLs
+   - All providers use same base message format but different endpoint URLs
+
+6. **Event-Driven Architecture**: AgentOrchestrator uses EventBus for communication. Events include:
+   - `workflow:started`, `workflow:completed`, `workflow:error`
+   - `stage:changed`
+   - `step:started`, `step:completed`
+   - `review:started`, `review:completed`
+   - `question:asked`

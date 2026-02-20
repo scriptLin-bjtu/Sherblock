@@ -12,8 +12,9 @@ import { ExecuteAgent } from '../executeBot/agent.js';
 export { WorkflowStage } from './state-machine.js';
 
 export class AgentOrchestrator {
-    constructor(callLLM) {
+    constructor(callLLM, options = {}) {
         this.callLLM = callLLM;
+        this._options = options;
 
         // Initialize agents
         this.questionAgent = new QuestionAgent(callLLM);
@@ -143,22 +144,48 @@ export class AgentOrchestrator {
         this._emit('collection:started', { initialInput });
 
         try {
+            // Get or create readline interface for user input
+            let rl = this._options.readline;
+            let createdRl = false;
+
+            if (!rl) {
+                // Create a readline interface if not provided
+                const readlineModule = await import('node:readline');
+                rl = readlineModule.createInterface({
+                    input: process.stdin,
+                    output: process.stdout,
+                });
+                createdRl = true;
+            }
+
+            const askUser = (question) => {
+                return new Promise((resolve) => {
+                    rl.question(question + '\n', resolve);
+                });
+            };
+
             // Use the QuestionAgent's collectRequirements method
             const infos = await this.questionAgent.collectRequirements(initialInput, {
                 onQuestion: async (question) => {
                     this._emit('question:asked', { question });
-                    // In a real implementation, this would get user input
-                    // For now, we'll throw an error indicating manual input is needed
-                    throw new Error('Manual user input required. Question: ' + question);
+                    // Get user input from stdin
+                    const answer = await askUser(question);
+                    return answer;
                 }
             });
+
+            // Close readline if we created it
+            if (createdRl && rl) {
+                rl.close();
+            }
 
             this._emit('collection:completed', { infos });
             return infos;
 
         } catch (error) {
             this._emit('collection:error', { error: error.message });
-            throw error;
+            // Re-throw with additional context
+            throw new Error(`Failed to collect requirements: ${error.message}`);
         }
     }
 
@@ -214,6 +241,8 @@ export class AgentOrchestrator {
 
             // Execute step
             await this.stateMachine.transition(WorkflowStage.EXECUTING, {
+                plan: this.workflowState.plan,
+                scope: this.workflowState.scope,
                 stepIndex,
                 step
             });
@@ -239,8 +268,11 @@ export class AgentOrchestrator {
 
             // Review step
             await this.stateMachine.transition(WorkflowStage.REVIEWING, {
+                plan: this.workflowState.plan,
+                scope: this.workflowState.scope,
+                currentStepIndex: this.workflowState.currentStepIndex,
                 stepIndex,
-                result
+                stepResult: result
             });
 
             this._emit('review:started', { stepIndex });

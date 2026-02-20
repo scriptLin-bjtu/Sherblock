@@ -92,14 +92,16 @@ export class QuestionAgent {
         if (initialInput) {
             const result = await this.react(`用户输入: ${initialInput}`);
             if (result === "DONE") {
+                // 验证收集完成
+                if (!this.isComplete()) {
+                    throw new Error('信息收集未完成。缺少必要字段。');
+                }
                 return this.infos;
             }
         }
 
-        // 等待直到信息收集完成
-        // 实际收集过程由 ReAct 循环处理
-        // 这里返回最终的 infos
-        return this.infos;
+        // 如果没有初始输入或收集未完成，抛出错误
+        throw new Error('信息收集需要用户输入。请提供 initialInput 或使用交互式模式。');
     }
 
     /**

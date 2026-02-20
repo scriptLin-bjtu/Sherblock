@@ -10,7 +10,8 @@
       "WebFetch(domain:docs.etherscan.io)",
       "Bash(grep:*)",
       "Bash(done:*)",
-      "Bash(openspec list:*)"
+      "Bash(openspec list:*)",
+      "Bash(npm start)"
     ]
   }
 }
