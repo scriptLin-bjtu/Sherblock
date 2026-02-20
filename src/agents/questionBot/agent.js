@@ -9,12 +9,15 @@ export class QuestionAgent {
             basic_infos: null,
         };
         this.callLLM = callLLM;
-        this.rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-        });
+        this.rl = null; // Lazy initialization for backward compatibility
         // ReAct 模式：只保存对话历史摘要，不传递完整消息
         this.conversationHistory = [];
+
+        // For driver-based collection mode
+        this._inputResolver = null;
+        this._inputPromise = null;
+        this._onQuestionCallback = null;
+        this._eventEmitter = null;
     }
 
     getinfos() {
@@ -41,6 +44,111 @@ export class QuestionAgent {
         if (!goal.analysis_type || !goal.depth) return false;
 
         return true;
+    }
+
+    /**
+     * 获取当前收集进度
+     * @returns {Object} 进度信息
+     */
+    getProgress() {
+        const totalFields = 3; // user_questions, goal, basic_infos
+        let filledFields = 0;
+        if (this.infos.user_questions !== null) filledFields++;
+        if (this.infos.goal !== null) filledFields++;
+        if (this.infos.basic_infos !== null) filledFields++;
+
+        return {
+            totalFields,
+            filledFields,
+            isRichEnough: this.isInfoRichEnough()
+        };
+    }
+
+    /**
+     * 检查信息收集是否完成
+     * @returns {boolean}
+     */
+    isComplete() {
+        return this.isInfoRichEnough();
+    }
+
+    /**
+     * 驱动式信息收集方法
+     * @param {string} [initialInput] - 初始用户输入
+     * @param {Object} [options] - 配置选项
+     * @param {Function} [options.onQuestion] - 问题回调函数
+     * @param {EventEmitter} [options.eventEmitter] - 事件发射器
+     * @returns {Promise<Object>} 收集到的 infos 对象
+     */
+    async collectRequirements(initialInput = null, options = {}) {
+        // 保存回调和事件发射器
+        this._onQuestionCallback = options.onQuestion || null;
+        this._eventEmitter = options.eventEmitter || null;
+
+        // 重置历史
+        this.conversationHistory = [];
+
+        // 如果有初始输入，开始 ReAct 循环
+        if (initialInput) {
+            const result = await this.react(`用户输入: ${initialInput}`);
+            if (result === "DONE") {
+                return this.infos;
+            }
+        }
+
+        // 等待直到信息收集完成
+        // 实际收集过程由 ReAct 循环处理
+        // 这里返回最终的 infos
+        return this.infos;
+    }
+
+    /**
+     * 处理用户输入（用于驱动式模式）
+     * @param {string} input - 用户输入
+     */
+    async handleUserInput(input) {
+        if (this._inputResolver) {
+            this._inputResolver(input);
+            this._inputResolver = null;
+        } else {
+            // 没有等待中的 Promise，触发 ReAct 循环
+            await this.react(`用户输入: ${input}`);
+        }
+    }
+
+    /**
+     * 等待用户输入
+     * @private
+     * @param {string} question - 问题文本
+     * @returns {Promise<string>} 用户输入
+     */
+    async _waitForUserInput(question) {
+        return new Promise((resolve, reject) => {
+            // 如果有回调，使用回调
+            if (this._onQuestionCallback) {
+                this._onQuestionCallback(question).then(resolve).catch(reject);
+                return;
+            }
+
+            // 如果有事件发射器，使用事件
+            if (this._eventEmitter) {
+                this._inputResolver = resolve;
+                this._eventEmitter.emit('question', { question, resolve, reject });
+                return;
+            }
+
+            // 默认：使用 readline（向后兼容）
+            if (!this.rl) {
+                this.rl = readline.createInterface({
+                    input: process.stdin,
+                    output: process.stdout,
+                });
+            }
+
+            this.rl.question(question + '\n', (answer) => {
+                resolve(answer);
+            });
+        });
     }
 
     // 深度合并对象
@@ -92,8 +200,15 @@ export class QuestionAgent {
             case "ASK":
                 // 向用户提问
                 console.log("问题:", action.question);
-                console.log("请输入你的回答:");
-                return "WAIT_USER"; // 等待用户输入
+
+                // 使用新的等待用户输入机制
+                try {
+                    const answer = await this._waitForUserInput(action.question);
+                    return await this.react(`用户回答: ${answer}`);
+                } catch (error) {
+                    console.error("获取用户输入失败:", error.message);
+                    return "WAIT_USER";
+                }
 
             case "UPDATE":
                 // 更新信息
@@ -135,7 +250,10 @@ export class QuestionAgent {
                     "📋 最终结果:",
                     JSON.stringify(this.infos, null, 2)
                 );
-                this.rl.close();
+                // 关闭 readline (if it was created)
+                if (this.rl) {
+                    this.rl.close();
+                }
                 return "DONE";
 
             default:
@@ -146,9 +264,22 @@ export class QuestionAgent {
         }
     }
 
+    /**
+     * Legacy run method - maintained for backward compatibility
+     * @deprecated Use collectRequirements() instead
+     */
     async run() {
+        console.warn("⚠️  DEPRECATED: QuestionAgent.run() is deprecated. Use collectRequirements() instead.");
         console.log("问答模块启动 (ReAct 模式)");
         console.log("请输入你的问题：");
+
+        // Initialize readline for legacy mode
+        if (!this.rl) {
+            this.rl = readline.createInterface({
+                input: process.stdin,
+                output: process.stdout,
+            });
+        }
 
         this.rl.on("line", async (input) => {
             if (input === "exit") {

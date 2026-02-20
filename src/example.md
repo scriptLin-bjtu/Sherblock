@@ -543,4 +543,3 @@ Step result: {
     { type: 'ACTION', content: [Object] }
   ]
 }
-PS D:\project\nodejs-project\sherblock> 
