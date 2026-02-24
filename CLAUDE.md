@@ -2,9 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 ## Project Overview
 
-This is a **Blockchain Transaction Behavior Analysis Agent** - a multi-agent system for analyzing blockchain transactions and addresses. It uses a Plan-and-Execute architecture with three specialized agents coordinated by a central orchestrator:
+This is a **Blockchain Transaction Behavior Analysis Agent** - a multi-agent system for analyzing blockchain transactions and addresses. It uses a Plan-and-Execute architecture with three specialized agents coordinated by a central orchestrator. The project uses ES Modules (`"type": "module"`).
 
 1. **QuestionAgent** (`src/agents/questionBot/`) - Interactive information collection using ReAct pattern
 2. **PlanAgent** (`src/agents/planBot/`) - Strategic planning using deepseek-reasoner model
@@ -56,10 +60,17 @@ Modular skill system with 20+ skills organized by category. Each skill is a sepa
 - **Logs**: Event logs
 - **Stats**: ETH price, supply
 
-**Skill Registry** (`src/agents/executeBot/skills/index.js`): Dynamically loads skills from filesystem. Each skill exports an object with:
+**Skill Registry** (`src/agents/executeBot/skills/index.js`): Dynamically loads skills from filesystem with:
+- `SkillLoader`: Discovers and caches skills (caching improves performance)
+- `SkillRegistry`: Manages loaded skills, validates parameters, resolves aliases
+- **Skill Aliases**: Handles common LLM naming variations (e.g., `GET_NORMAL_TRANSACTIONS` → `GET_TRANSACTIONS`)
+
+Each skill exports an object with:
 - `name`, `description`, `category`, `params` (required/optional)
 - `whenToUse` (array of scenarios)
 - `execute(params, context)` async function
+
+Skills use a shared `lib/etherscan-client.js` library for API calls with built-in parameter normalization (handles common LLM naming mistakes like `startBlock` → `startblock`).
 
 Supported chains: Ethereum, Polygon, BSC, Arbitrum, Optimism, Base, Avalanche, and more.
 
@@ -88,12 +99,16 @@ Environment variables (in `.env`):
 - `ETHERSCAN_API_KEY` - Etherscan API key
 - `HTTP_PROXY` - Proxy URL (defaults to `http://127.0.0.1:7890`)
 
+**Note**: The `.env` file and `data/` directory are excluded from git (see `.gitignore`). Create `.env` locally with your API keys.
+
 ## Key Files and Structure
 
 ```
 src/
 ├── index.js                    # Main entry point, agent initialization
 ├── test.js                     # Etherscan API test script
+├── utils/
+│   └── scope-manager.js       # Scope persistence to JSON file
 ├── services/
 │   └── agent.js               # LLM service with multi-provider support
 └── agents/
@@ -115,6 +130,9 @@ src/
         └── state-machine.js   # Workflow state management with guards
 ```
 
+**data/ directory** (created at runtime):
+- `scope.json` - Current workflow scope persisted to file for debugging
+
 ## Important Implementation Details
 
 1. **Proxy Configuration**: All external API calls (Etherscan, LLM providers) use a proxy configured via `HTTP_PROXY` env var (defaults to `http://127.0.0.1:7890`). Uses `undici`'s ProxyAgent.
@@ -126,6 +144,7 @@ src/
    - PlanAgent generates a plan with `scope` (shared state) and `steps`
    - ExecuteAgent updates `scope` during execution via `UPDATE_SCOPE` actions
    - WorkflowStateMachine enforces state transitions with guards
+   - **ScopeManager** (`src/utils/scope-manager.js`): Persists scope to JSON file (`data/scope.json`) for debugging and recovery
 
 4. **Skill System**: Skills are modular and loaded dynamically. Each skill is a self-contained module that:
    - Defines its interface (name, params, when to use)

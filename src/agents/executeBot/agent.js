@@ -6,7 +6,7 @@ import { SkillRegistry, SUPPORTED_CHAINS } from "./skills/index.js";
  * Uses ReAct (Reasoning + Acting) pattern
  */
 export class ExecuteAgent {
-    constructor(callLLM) {
+    constructor(callLLM, scopeManager) {
         this.callLLM = callLLM;
         this.scope = null;
         this.currentStep = null;
@@ -16,6 +16,7 @@ export class ExecuteAgent {
         this.maxRetries = 3;
         this.skillRegistry = new SkillRegistry();
         this.initialized = false;
+        this.scopeManager = scopeManager;
     }
 
     async initialize() {
@@ -50,7 +51,8 @@ export class ExecuteAgent {
     /**
      * Deep merge updates into scope
      */
-    mergeUpdates(updates) {
+    async mergeUpdates(updates) {
+        console.log('[ExecuteAgent] mergeUpdates called with:', JSON.stringify(Object.keys(updates)));
         for (const key of Object.keys(updates)) {
             if (
                 this.scope[key] !== undefined &&
@@ -62,6 +64,15 @@ export class ExecuteAgent {
             } else {
                 this.scope[key] = updates[key];
             }
+        }
+        console.log('[ExecuteAgent] Updated scope in memory, keys:', Object.keys(this.scope));
+        // Write updated scope to file
+        if (this.scopeManager) {
+            console.log('[ExecuteAgent] Calling scopeManager.write()...');
+            await this.scopeManager.write(this.scope);
+            console.log('[ExecuteAgent] scopeManager.write() completed');
+        } else {
+            console.log('[ExecuteAgent] WARNING: scopeManager is not available!');
         }
     }
 
@@ -269,7 +280,7 @@ Constraints: ${JSON.stringify(currentStep.constraints || "none")}`;
             case "UPDATE_SCOPE": {
                 // Update scope with new findings
                 if (action.updates) {
-                    this.mergeUpdates(action.updates);
+                    await this.mergeUpdates(action.updates);
                     console.log(
                         "[ExecuteAgent] Scope updated:",
                         JSON.stringify(action.updates, null, 2)
@@ -278,7 +289,7 @@ Constraints: ${JSON.stringify(currentStep.constraints || "none")}`;
 
                 await new Promise((r) => setTimeout(r, 200));
                 return await this.react(
-                    `Scope updated successfully. Current scope keys: ${Object.keys(
+                    `Scope updated. Current scope keys: ${Object.keys(
                         this.scope
                     ).join(", ")}`
                 );

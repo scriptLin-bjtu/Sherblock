@@ -8,6 +8,7 @@ import { WorkflowStateMachine, WorkflowStage } from './state-machine.js';
 import { QuestionAgent } from '../questionBot/agent.js';
 import { PlanAgent } from '../planBot/agent.js';
 import { ExecuteAgent } from '../executeBot/agent.js';
+import { scopeManager } from '../../utils/scope-manager.js';
 
 export { WorkflowStage } from './state-machine.js';
 
@@ -19,11 +20,14 @@ export class AgentOrchestrator {
         // Initialize agents
         this.questionAgent = new QuestionAgent(callLLM);
         this.planAgent = new PlanAgent(callLLM);
-        this.executeAgent = new ExecuteAgent(callLLM);
+        this.executeAgent = new ExecuteAgent(callLLM, this.scopeManager);
 
         // Initialize supporting components
         this.eventBus = new EventBus();
         this.stateMachine = new WorkflowStateMachine(WorkflowStage.IDLE);
+
+        // Initialize scope manager
+        this.scopeManager = scopeManager;
 
         // Workflow state
         this.workflowState = {
@@ -95,6 +99,9 @@ export class AgentOrchestrator {
      */
     async run(initialInput = null) {
         try {
+            // Initialize scope manager
+            await this.scopeManager.initialize();
+
             // Initialize execute agent
             await this.executeAgent.initialize();
 
@@ -110,6 +117,9 @@ export class AgentOrchestrator {
             const infos = await this._collectRequirements(initialInput);
             this.workflowState.scope = { ...infos };
 
+            // Write initial scope to file
+            await this.scopeManager.write(this.workflowState.scope);
+
             // Phase 2: Create plan
             await this.stateMachine.transition(WorkflowStage.PLANNING, {
                 infos
@@ -120,11 +130,18 @@ export class AgentOrchestrator {
             // Initialize scope from plan
             this.workflowState.scope = { ...this.workflowState.scope, ...plan.scope };
 
+            // Write updated scope to file
+            await this.scopeManager.write(this.workflowState.scope);
+
             // Phase 3: Execute with review
             const result = await this._executeWithReview();
 
-            // Complete workflow
-            await this.stateMachine.transition(WorkflowStage.COMPLETED, {});
+            // Complete workflow - pass full context for guard check
+            await this.stateMachine.transition(WorkflowStage.COMPLETED, {
+                plan: this.workflowState.plan,
+                scope: this.workflowState.scope,
+                currentStepIndex: this.workflowState.currentStepIndex
+            });
 
             this._emit('workflow:completed', result);
 
@@ -374,7 +391,10 @@ export class AgentOrchestrator {
                     );
                 }
                 // Reset to planning phase to regenerate with modifications
+                // Include scope in context to pass guard check
                 await this.stateMachine.transition(WorkflowStage.PLANNING, {
+                    infos: this.workflowState.scope,
+                    scope: this.workflowState.scope,
                     plan: this.workflowState.plan
                 });
                 return true;

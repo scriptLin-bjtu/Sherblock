@@ -1,6 +1,7 @@
 import readline from "node:readline";
 import { callLLM } from "./services/agent.js";
 import { AgentOrchestrator } from "./agents/orchestrator/index.js";
+import { logger } from "./utils/logger.js";
 
 // Create readline interface
 const rl = readline.createInterface({
@@ -47,6 +48,12 @@ orchestrator.on('workflow:error', (data) => {
 // Main entry point
 async function main() {
     try {
+        // Initialize logger
+        const logFile = await logger.initialize();
+        if (logFile) {
+            console.log(`📝 Logging to: ${logFile}`);
+        }
+
         console.log('🤖 区块链交易行为分析代理');
         console.log('请描述您想分析的区块链交易或地址：');
 
@@ -65,9 +72,11 @@ async function main() {
         console.log('\n最终结果:', result);
 
         rl.close();
+        await logger.close();
     } catch (error) {
         console.error('Workflow failed:', error);
         rl.close();
+        await logger.close();
         process.exit(1);
     }
 }
