@@ -20,14 +20,27 @@ export class SkillLoader {
         if (this.discoveryCache) return this.discoveryCache;
 
         const skills = [];
-        const categories = ['account', 'contract', 'token', 'transaction', 'proxy', 'logs', 'stats'];
+        const categories = [
+            "account",
+            "contract",
+            "token",
+            "transaction",
+            "proxy",
+            "logs",
+            "stats",
+            "gas",
+            "block",
+            "nametag",
+        ];
 
         for (const category of categories) {
             const categoryPath = join(basePath, category);
             try {
-                const entries = await readdir(categoryPath, { withFileTypes: true });
+                const entries = await readdir(categoryPath, {
+                    withFileTypes: true,
+                });
                 for (const entry of entries) {
-                    if (entry.isDirectory() && !entry.name.startsWith('_')) {
+                    if (entry.isDirectory() && !entry.name.startsWith("_")) {
                         skills.push({
                             id: `${category}/${entry.name}`,
                             path: join(categoryPath, entry.name),
@@ -48,9 +61,9 @@ export class SkillLoader {
     async loadSkill(skillPath) {
         if (this.cache.has(skillPath)) return this.cache.get(skillPath);
 
-        const indexPath = join(skillPath, 'index.js');
+        const indexPath = join(skillPath, "index.js");
         // Convert to file:// URL for Windows compatibility
-        const fileUrl = new URL(`file://${indexPath.replace(/\\/g, '/')}`).href;
+        const fileUrl = new URL(`file://${indexPath.replace(/\\/g, "/")}`).href;
         const module = await import(fileUrl);
         const skill = module.default || module;
 
@@ -61,10 +74,16 @@ export class SkillLoader {
     }
 
     validateSkill(skill, path) {
-        const required = ['name', 'description', 'category', 'params', 'execute'];
-        const missing = required.filter(f => !(f in skill));
+        const required = [
+            "name",
+            "description",
+            "category",
+            "params",
+            "execute",
+        ];
+        const missing = required.filter((f) => !(f in skill));
         if (missing.length > 0) {
-            throw new Error(`Skill at ${path} missing: ${missing.join(', ')}`);
+            throw new Error(`Skill at ${path} missing: ${missing.join(", ")}`);
         }
     }
 
@@ -114,12 +133,17 @@ export class SkillRegistry {
                     skill,
                 });
             } catch (error) {
-                console.error(`[SkillRegistry] Failed to load skill at ${path}:`, error.message);
+                console.error(
+                    `[SkillRegistry] Failed to load skill at ${path}:`,
+                    error.message
+                );
             }
         }
 
         this.initialized = true;
-        console.log(`[SkillRegistry] Initialized with ${this.skills.size} skills`);
+        console.log(
+            `[SkillRegistry] Initialized with ${this.skills.size} skills`
+        );
     }
 
     /**
@@ -134,7 +158,9 @@ export class SkillRegistry {
         // Check aliases
         const aliasedName = SKILL_ALIASES[name];
         if (aliasedName && this.skills.has(aliasedName)) {
-            console.log(`[SkillRegistry] Resolved alias "${name}" to "${aliasedName}"`);
+            console.log(
+                `[SkillRegistry] Resolved alias "${name}" to "${aliasedName}"`
+            );
             return aliasedName;
         }
 
@@ -154,17 +180,23 @@ export class SkillRegistry {
     }
 
     listSkills() {
-        return Array.from(this.skills.values()).map(({ name, description, category }) => ({
-            name,
-            description,
-            category,
-        }));
+        return Array.from(this.skills.values()).map(
+            ({ name, description, category }) => ({
+                name,
+                description,
+                category,
+            })
+        );
     }
 
     getSkillsByCategory(category) {
         return Array.from(this.skills.values())
-            .filter(s => s.category === category)
-            .map(({ name, description, category }) => ({ name, description, category }));
+            .filter((s) => s.category === category)
+            .map(({ name, description, category }) => ({
+                name,
+                description,
+                category,
+            }));
     }
 
     validateParameters(name, params) {
@@ -175,7 +207,7 @@ export class SkillRegistry {
 
         const skill = this.skills.get(resolvedName);
         const required = skill.params.required || [];
-        const missing = required.filter(p => {
+        const missing = required.filter((p) => {
             const value = params[p];
             return value === undefined || value === null || value === "";
         });
@@ -214,8 +246,12 @@ export class SkillRegistry {
             for (const skill of skills) {
                 doc += `#### ${skill.name}\n`;
                 doc += `- **Description**: ${skill.description}\n`;
-                doc += `- **Required params**: ${skill.params.required.join(", ") || "none"}\n`;
-                doc += `- **Optional params**: ${skill.params.optional.join(", ") || "none"}\n`;
+                doc += `- **Required params**: ${
+                    skill.params.required.join(", ") || "none"
+                }\n`;
+                doc += `- **Optional params**: ${
+                    skill.params.optional.join(", ") || "none"
+                }\n`;
                 if (skill.whenToUse?.length > 0) {
                     doc += `- **When to use**: ${skill.whenToUse.join("; ")}\n`;
                 }

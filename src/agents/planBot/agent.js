@@ -82,6 +82,19 @@ export class PlanAgent {
             currentPlan
         };
 
+        // 防御性检查：确保所有必要字段都被定义
+        if (!step || !executionResult) {
+            console.error('[PlanAgent] reviewStep: Invalid parameters - step or executionResult is undefined');
+            return {
+                assessment: 'failure',
+                findings: 'Invalid parameters: step or executionResult is undefined',
+                decision: 'CONTINUE',
+                adjustments: [],
+                reason: 'Cannot perform review with invalid parameters',
+                nextStepRecommendation: 'continue'
+            };
+        }
+
         const res = await this.callLLM({
             systemPrompt: reviewPrompt(),
             apiKey: process.env.DEEPSEEK_API_KEY,
@@ -95,6 +108,19 @@ export class PlanAgent {
         // 提取解析后的数据
         const data = res.data || res;
 
+        // 防御性检查：确保返回的数据是对象
+        if (!data || typeof data !== 'object') {
+            console.error('[PlanAgent] reviewStep: Invalid LLM response - data is not an object');
+            return {
+                assessment: 'failure',
+                findings: 'Invalid LLM response format',
+                decision: 'CONTINUE',
+                adjustments: [],
+                reason: 'LLM did not return valid JSON object',
+                nextStepRecommendation: 'continue'
+            };
+        }
+
         console.log("步骤审查结果:", JSON.stringify(data, null, 2));
         return data;
     }
@@ -106,7 +132,7 @@ export class PlanAgent {
      * @returns {Object} 更新后的计划
      */
     adjustPlan(plan, adjustments) {
-        if (!adjustments || adjustments.length === 0) {
+        if (!adjustments || (Array.isArray(adjustments) && adjustments.length === 0)) {
             return plan;
         }
 

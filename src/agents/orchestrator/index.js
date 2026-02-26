@@ -17,6 +17,9 @@ export class AgentOrchestrator {
         this.callLLM = callLLM;
         this._options = options;
 
+        // Initialize scope manager
+        this.scopeManager = scopeManager;
+
         // Initialize agents
         this.questionAgent = new QuestionAgent(callLLM);
         this.planAgent = new PlanAgent(callLLM);
@@ -25,9 +28,6 @@ export class AgentOrchestrator {
         // Initialize supporting components
         this.eventBus = new EventBus();
         this.stateMachine = new WorkflowStateMachine(WorkflowStage.IDLE);
-
-        // Initialize scope manager
-        this.scopeManager = scopeManager;
 
         // Workflow state
         this.workflowState = {
@@ -312,6 +312,9 @@ export class AgentOrchestrator {
             const shouldContinue = await this._handleReviewDecision(reviewResult);
 
             if (!shouldContinue) {
+                // Even when terminating, increment step index to mark this step as completed
+                // This ensures the transition to COMPLETED state passes the guard check
+                this.workflowState.currentStepIndex++;
                 break;
             }
 
