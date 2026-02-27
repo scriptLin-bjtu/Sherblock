@@ -23,7 +23,11 @@ export class AgentOrchestrator {
         // Initialize agents
         this.questionAgent = new QuestionAgent(callLLM);
         this.planAgent = new PlanAgent(callLLM);
-        this.executeAgent = new ExecuteAgent(callLLM, this.scopeManager);
+        this.executeAgent = new ExecuteAgent(callLLM, this.scopeManager, {
+            compressionEnabled: options.compressionEnabled,
+            useLegacyPrompt: options.executeAgent?.useLegacyPrompt,
+            compressionConfig: options.executeAgent?.compressionConfig,
+        });
 
         // Initialize supporting components
         this.eventBus = new EventBus();

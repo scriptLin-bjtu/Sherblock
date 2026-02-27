@@ -1,4 +1,7 @@
-import { prompt } from "./prompt.js";
+import { prompt, formatObservation } from "./prompt.js";
+import { getSystemPrompt } from "./prompt-system.js";
+import { generateUserPrompt, generateInitialObservation } from "./prompt-user.js";
+import { CompressionManager } from "./compression/manager.js";
 import { SkillRegistry, SUPPORTED_CHAINS } from "./skills/index.js";
 
 /**
@@ -6,7 +9,7 @@ import { SkillRegistry, SUPPORTED_CHAINS } from "./skills/index.js";
  * Uses ReAct (Reasoning + Acting) pattern
  */
 export class ExecuteAgent {
-    constructor(callLLM, scopeManager) {
+    constructor(callLLM, scopeManager, options = {}) {
         this.callLLM = callLLM;
         this.scope = null;
         this.currentStep = null;
@@ -17,11 +20,35 @@ export class ExecuteAgent {
         this.skillRegistry = new SkillRegistry();
         this.initialized = false;
         this.scopeManager = scopeManager;
+
+        // Store options for later use
+        this._options = options;
+
+        // Compression configuration
+        this.compressionEnabled = options.compressionEnabled !== undefined
+            ? options.compressionEnabled
+            : true; // Enabled by default
+        this.compressionManager = null;
+
+        // Legacy mode: if compression is explicitly disabled, use original behavior
+        this.useLegacyPrompt = options.useLegacyPrompt === true;
     }
 
     async initialize() {
         if (this.initialized) return;
         await this.skillRegistry.initialize();
+
+        // Initialize compression manager if enabled
+        if (this.compressionEnabled && !this.useLegacyPrompt) {
+            this.compressionManager = new CompressionManager({
+                enabled: true,
+                ...(this._options.compressionConfig || {}),
+            });
+            console.log("[ExecuteAgent] Compression enabled");
+        } else {
+            console.log("[ExecuteAgent] Compression disabled (legacy mode)");
+        }
+
         this.initialized = true;
     }
 
@@ -167,11 +194,7 @@ export class ExecuteAgent {
         console.log(`\n[ExecuteAgent] Starting step: ${currentStep.goal}`);
 
         // Start the ReAct loop with initial observation
-        const initialObservation = `Starting execution of step: "${
-            currentStep.goal
-        }".
-Success criteria: ${JSON.stringify(currentStep.success_criteria)}
-Constraints: ${JSON.stringify(currentStep.constraints || "none")}`;
+        const initialObservation = generateInitialObservation(currentStep);
 
         return await this.react(initialObservation);
     }
@@ -210,15 +233,53 @@ Constraints: ${JSON.stringify(currentStep.constraints || "none")}`;
             };
         }
 
+        // Prepare prompts based on mode (compressed or legacy)
+        let systemPrompt, userMessageText;
+
+        if (this.useLegacyPrompt || !this.compressionManager) {
+            // Legacy mode: use original prompt function
+            systemPrompt = prompt(this.scope, this.currentStep, this.executionHistory);
+            userMessageText = observation;
+        } else {
+            // Compressed mode: use separate system and user prompts
+            try {
+                // Compress context
+                const compressed = this.compressionManager.compressPrompt(
+                    this.scope,
+                    this.currentStep,
+                    this.executionHistory
+                );
+
+                systemPrompt = getSystemPrompt();
+                userMessageText = generateUserPrompt(
+                    compressed.scope,
+                    compressed.currentStep,
+                    compressed.history
+                );
+
+                // Add observation to the end
+                if (observation) {
+                    userMessageText += `\n\n[Latest Observation]\n${observation}`;
+                }
+
+                // Log compression stats periodically
+                if (this.compressionManager.getStats().totalCalls % 3 === 0) {
+                    const stats = this.compressionManager.getStats();
+                    console.log(`[ExecuteAgent] Compression stats: ${stats.savedPercent}% saved (${stats.totalSavedTokens} tokens)`);
+                }
+            } catch (error) {
+                console.warn("[ExecuteAgent] Compression failed, falling back to legacy mode:", error.message);
+                this.useLegacyPrompt = true;
+                systemPrompt = prompt(this.scope, this.currentStep, this.executionHistory);
+                userMessageText = observation;
+            }
+        }
+
         // Call LLM for next action
         const res = await this.callLLM({
-            systemPrompt: prompt(
-                this.scope,
-                this.currentStep,
-                this.executionHistory
-            ),
+            systemPrompt: systemPrompt,
             apiKey: process.env.DEEPSEEK_API_KEY,
-            user_messages: [{ type: "text", text: observation }],
+            user_messages: [{ type: "text", text: userMessageText }],
             modelProvider: "deepseek",
         });
 
@@ -346,5 +407,40 @@ Constraints: ${JSON.stringify(currentStep.constraints || "none")}`;
      */
     getHistory() {
         return this.executionHistory;
+    }
+
+    /**
+     * Get compression statistics
+     * @returns {Object|null} - Compression stats or null if compression disabled
+     */
+    getCompressionStats() {
+        if (!this.compressionManager) {
+            return {
+                enabled: false,
+                message: "Compression is disabled",
+            };
+        }
+        return this.compressionManager.getStats();
+    }
+
+    /**
+     * Reset compression statistics
+     */
+    resetCompressionStats() {
+        if (this.compressionManager) {
+            this.compressionManager.resetStats();
+        }
+    }
+
+    /**
+     * Enable or disable compression dynamically
+     * @param {boolean} enabled - Whether to enable compression
+     */
+    setCompressionEnabled(enabled) {
+        this.compressionEnabled = enabled;
+        if (this.compressionManager) {
+            this.compressionManager.setEnabled(enabled);
+        }
+        console.log(`[ExecuteAgent] Compression ${enabled ? "enabled" : "disabled"}`);
     }
 }
