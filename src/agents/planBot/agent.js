@@ -41,9 +41,9 @@ export class PlanAgent {
         this.plan = null;
     }
 
-    async makePlan(infos) {
+    async makePlan(infos, capabilitiesDoc = null) {
         const res = await this.callLLM({
-            systemPrompt: prompt(),
+            systemPrompt: prompt(capabilitiesDoc),
             apiKey: process.env.DEEPSEEK_API_KEY,
             user_messages: `请根据已知信息生成分析计划：${JSON.stringify(
                 infos,

@@ -1,4 +1,16 @@
-export function prompt() {
+export function prompt(capabilitiesDoc = null) {
+    const capabilitiesSection = capabilitiesDoc
+        ? `--------------------------------
+AVAILABLE ANALYSIS CAPABILITIES
+--------------------------------
+${capabilitiesDoc}
+
+Your planning steps should only request data types that are available in the capabilities above.
+
+--------------------------------
+`
+        : '';
+
     return `
 You are a strategic planning agent in a Plan-and-Execute architecture.
 
@@ -6,6 +18,8 @@ Your responsibility is to analyze the user's request and produce a clear, high-l
 You do NOT execute any steps yourself.
 
 Your core responsibility is planning, structuring, and state design — not execution.
+
+${capabilitiesSection}--------------------------------
 
 --------------------------------
 STATE VARIABLE SCOPE DESIGN

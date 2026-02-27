@@ -274,6 +274,38 @@ export class SkillRegistry {
             skillNames: Array.from(this.skills.keys()),
         };
     }
+
+    /**
+     * Generate a high-level capability summary for planning purposes
+     * Focuses on what data can be obtained, not technical implementation
+     */
+    generateCapabilitySummary() {
+        let summary = "# Available Analysis Capabilities\n\n";
+        summary += "The following data can be queried during execution:\n\n";
+
+        const categoryDescriptions = {
+            account: "## Account Analysis\n- Query native ETH balance for any address\n- Get transaction history (normal and internal transactions)\n- Identify funding sources and related addresses\n- Get transaction count (nonce) for an address",
+            contract: "## Contract Analysis\n- Retrieve contract ABI and source code\n- Identify contract creator address\n- Read contract code and storage",
+            transaction: "## Transaction Analysis\n- Get transaction details and receipt\n- Query transaction status and internal transactions triggered by a transaction",
+            token: "## Token Analysis\n- Query token information (name, symbol, total supply)\n- Get ERC20/ERC721/ERC1155 transfer events\n- Query token balances for specific addresses\n- Get top token holders for a contract",
+            proxy: "## Blockchain RPC\n- Get current block number\n- Get block information by number or timestamp\n- Get transaction details and receipt by hash\n- Read contract code via eth_call\n- Query gas price",
+            logs: "## Event Logs\n- Query event logs by address, topics, and block range",
+            stats: "## Network Statistics\n- Get ETH price and total supply\n- Query block rewards\n- Get token supply information",
+            gas: "## Gas Analysis\n- Query estimated gas prices and gas costs",
+            block: "## Block Analysis\n- Get block information by timestamp",
+            nametag: "## Address Metadata\n- Get address tags and labels",
+            basic: "## Basic Operations\n- Query basic blockchain data",
+        };
+
+        for (const [category, description] of Object.entries(categoryDescriptions)) {
+            const hasSkills = Array.from(this.skills.values()).some(s => s.category === category);
+            if (hasSkills) {
+                summary += description + "\n\n";
+            }
+        }
+
+        return summary;
+    }
 }
 
 export const skillRegistry = new SkillRegistry();

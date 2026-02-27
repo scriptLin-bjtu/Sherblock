@@ -214,7 +214,16 @@ export class AgentOrchestrator {
         this._emit('planning:started', { infos });
 
         try {
-            const plan = await this.planAgent.makePlan(infos);
+            // Ensure executeAgent is initialized to access skill registry
+            if (!this.executeAgent.initialized) {
+                await this.executeAgent.initialize();
+            }
+
+            // Get capability summary from skill registry
+            const capabilitiesDoc = this.executeAgent.skillRegistry.generateCapabilitySummary();
+            console.log('[Orchestrator] Generated capability summary for planning');
+
+            const plan = await this.planAgent.makePlan(infos, capabilitiesDoc);
 
             this._emit('planning:completed', { plan });
             return plan;
