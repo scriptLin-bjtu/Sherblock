@@ -12,7 +12,12 @@
       "Bash(done:*)",
       "Bash(openspec list:*)",
       "Bash(npm start)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "WebFetch(domain:echarts.apache.org)",
+      "WebFetch(domain:github.com)",
+      "Bash(npm install:*)",
+      "Bash(ls:*)",
+      "Bash(npm run:*)"
     ]
   }
 }

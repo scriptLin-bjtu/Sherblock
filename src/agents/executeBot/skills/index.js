@@ -31,6 +31,7 @@ export class SkillLoader {
             "gas",
             "block",
             "nametag",
+            "chart",
         ];
 
         for (const category of categories) {
@@ -106,6 +107,15 @@ const SKILL_ALIASES = {
     GET_CURRENT_BLOCK: "ETH_BLOCK_NUMBER",
     GET_LATEST_BLOCK: "ETH_BLOCK_NUMBER",
     GET_BLOCK_NUMBER: "ETH_BLOCK_NUMBER",
+
+    // Chart skill aliases
+    CREATE_SCATTER: "CREATE_SCATTER_CHART",
+    CREATE_RADAR: "CREATE_RADAR_CHART",
+    CREATE_AREA: "CREATE_AREA_CHART",
+    CREATE_MIXED: "CREATE_MIXED_CHART",
+    CREATE_HEATMAP: "CREATE_HEATMAP_CHART",
+    CREATE_GAUGE: "CREATE_GAUGE_CHART",
+    CREATE_FUNNEL: "CREATE_FUNNEL_CHART",
 };
 
 export class SkillRegistry {
@@ -294,6 +304,7 @@ export class SkillRegistry {
             gas: "## Gas Analysis\n- Query estimated gas prices and gas costs",
             block: "## Block Analysis\n- Get block information by timestamp",
             nametag: "## Address Metadata\n- Get address tags and labels",
+            chart: "## Data Visualization\n- Generate line charts for trends and time series\n- Create bar charts for comparisons\n- Produce pie charts for distribution analysis\n- Generate scatter charts for relationship analysis\n- Create radar charts for multi-dimensional comparison\n- Produce area charts to emphasize quantity changes\n- Create mixed charts combining multiple chart types\n- Generate heatmap charts for matrix density visualization\n- Create gauge charts for key metric display\n- Produce funnel charts for conversion rate analysis\n- Create custom charts with full ECharts configuration\n- Support SVG, PNG, JPEG, and WebP export formats\n- Support light and dark themes",
             basic: "## Basic Operations\n- Query basic blockchain data",
         };
 
