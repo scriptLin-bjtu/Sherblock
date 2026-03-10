@@ -41,8 +41,20 @@ export class ScopeFilter {
      * @returns {Object} - Filtered scope
      */
     filter(scope, currentStep) {
+        // Calculate original size with error handling
+        let originalSize = 0;
+        try {
+            originalSize = JSON.stringify(scope).length;
+        } catch (error) {
+            console.error("[ERROR] ScopeFilter: JSON.stringify(scope) failed:", {
+                error: error.message,
+                stack: error.stack,
+            });
+            originalSize = 0;
+        }
+
         this.stats = {
-            originalSize: JSON.stringify(scope).length,
+            originalSize,
             compressedSize: 0,
             originalTokens: 0,
             compressedTokens: 0,
@@ -54,8 +66,17 @@ export class ScopeFilter {
             return {};
         }
 
-        // Calculate original tokens
-        const originalStr = JSON.stringify(scope, null, 2);
+        // Calculate original tokens with error handling
+        let originalStr = "{}";
+        try {
+            originalStr = JSON.stringify(scope, null, 2);
+        } catch (error) {
+            console.error("[ERROR] ScopeFilter: JSON.stringify(scope, null, 2) failed:", {
+                error: error.message,
+                stack: error.stack,
+            });
+            originalStr = JSON.stringify({ _error: "Unable to serialize scope" }, null, 2);
+        }
         this.stats.originalTokens = estimateTokens(originalStr);
 
         // Extract relevant fields from current step
@@ -100,8 +121,13 @@ export class ScopeFilter {
             }
         }
 
-        // Calculate compressed tokens
-        const compressedStr = JSON.stringify(filtered, null, 2);
+        // Calculate compressed tokens with error handling
+        let compressedStr = "{}";
+        try {
+            compressedStr = JSON.stringify(filtered, null, 2);
+        } catch {
+            compressedStr = JSON.stringify({ _error: "Unable to serialize filtered scope" }, null, 2);
+        }
         this.stats.compressedSize = compressedStr.length;
         this.stats.compressedTokens = estimateTokens(compressedStr);
 
@@ -134,7 +160,16 @@ export class ScopeFilter {
         }
 
         const fields = new Set();
-        const text = JSON.stringify(step).toLowerCase();
+        let text = "";
+        try {
+            text = JSON.stringify(step).toLowerCase();
+        } catch (error) {
+            console.error("[ERROR] ScopeFilter: JSON.stringify(step) failed:", {
+                error: error.message,
+                stack: error.stack,
+            });
+            text = "";
+        }
 
         // Common field patterns
         const patterns = {

@@ -143,12 +143,23 @@ export class AgentOrchestrator {
             // Phase 4: Generate report
             const report = await this._generateReport();
 
-            // Complete workflow - pass full context for guard check
-            await this.stateMachine.transition(WorkflowStage.COMPLETED, {
-                plan: this.workflowState.plan,
-                scope: this.workflowState.scope,
-                currentStepIndex: this.workflowState.currentStepIndex
-            });
+            // Complete workflow - 只在合适的状态下转换到 COMPLETED
+            const currentState = this.stateMachine.getState();
+            if (currentState === WorkflowStage.EXECUTING || currentState === WorkflowStage.REVIEWING) {
+                await this.stateMachine.transition(WorkflowStage.COMPLETED, {
+                    plan: this.workflowState.plan,
+                    scope: this.workflowState.scope,
+                    currentStepIndex: this.workflowState.currentStepIndex
+                });
+            } else if (currentState === WorkflowStage.PLANNING) {
+                // 如果在 PLANNING 状态（由于审查修改了计划），直接转换到 COMPLETED
+                // 此时所有步骤已完成，只是状态在 PLANNING
+                await this.stateMachine.transition(WorkflowStage.COMPLETED, {
+                    plan: this.workflowState.plan,
+                    scope: this.workflowState.scope,
+                    currentStepIndex: this.workflowState.currentStepIndex
+                });
+            }
 
             this._emit('workflow:completed', { result, report });
 
@@ -510,7 +521,8 @@ ${error.message}
                     if (reorderAdjustment && reorderAdjustment.newOrder) {
                         this.workflowState.plan = this.planAgent.reorderRemainingSteps(
                             this.workflowState.plan,
-                            reorderAdjustment.newOrder
+                            reorderAdjustment.newOrder,
+                            this.workflowState.currentStepIndex  // 传递当前步骤索引
                         );
                     }
                 }

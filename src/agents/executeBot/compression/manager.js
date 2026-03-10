@@ -74,9 +74,32 @@ export class CompressionManager {
         this.stats.totalCompressedTokens += compressedTokens;
         this.stats.historyStats = historyStats;
         this.stats.scopeStats = scopeStats;
+
+        // Calculate step stats with error handling
+        let originalSize = 0;
+        let compressedSize = 0;
+        try {
+            originalSize = JSON.stringify(currentStep).length;
+        } catch (error) {
+            console.error("[ERROR] CompressionManager: JSON.stringify(currentStep) failed:", {
+                error: error.message,
+                stack: error.stack,
+            });
+            originalSize = 0;
+        }
+        try {
+            compressedSize = JSON.stringify(compressedStep).length;
+        } catch (error) {
+            console.error("[ERROR] CompressionManager: JSON.stringify(compressedStep) failed:", {
+                error: error.message,
+                stack: error.stack,
+            });
+            compressedSize = 0;
+        }
+
         this.stats.currentStepStats = {
-            originalSize: JSON.stringify(currentStep).length,
-            compressedSize: JSON.stringify(compressedStep).length,
+            originalSize,
+            compressedSize,
         };
 
         debugLog("Compression complete", {
@@ -88,10 +111,11 @@ export class CompressionManager {
                 : 0,
         });
 
+        // Ensure returned values are valid
         return {
-            scope: filteredScope,
-            currentStep: compressedStep,
-            history: compressedHistory,
+            scope: filteredScope || {},
+            currentStep: compressedStep || {},
+            history: Array.isArray(compressedHistory) ? compressedHistory : [],
             compressed: true,
         };
     }

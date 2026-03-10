@@ -16,7 +16,7 @@ export const WorkflowStage = {
 const VALID_TRANSITIONS = {
     [WorkflowStage.IDLE]: [WorkflowStage.COLLECTING],
     [WorkflowStage.COLLECTING]: [WorkflowStage.PLANNING],
-    [WorkflowStage.PLANNING]: [WorkflowStage.EXECUTING],
+    [WorkflowStage.PLANNING]: [WorkflowStage.EXECUTING, WorkflowStage.COMPLETED],
     [WorkflowStage.EXECUTING]: [WorkflowStage.REVIEWING],
     [WorkflowStage.REVIEWING]: [WorkflowStage.EXECUTING, WorkflowStage.PLANNING, WorkflowStage.COMPLETED],
     [WorkflowStage.COMPLETED]: []

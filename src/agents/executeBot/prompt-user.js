@@ -17,25 +17,30 @@
  * @returns {string} - The user prompt
  */
 export function generateUserPrompt(scope, currentStep, executionHistory = []) {
+    // Defensive check: ensure executionHistory is an array
+    const safeHistory = Array.isArray(executionHistory) ? executionHistory : [];
+    const safeScope = scope || {};
+    const safeStep = currentStep || {};
+
     const parts = [];
 
     // Add scope section
     parts.push("# Current Analysis Scope");
-    parts.push(JSON.stringify(scope, null, 2));
+    parts.push(JSON.stringify(safeScope, null, 2));
     parts.push("");
 
     // Add current step section
     parts.push("# Current Step to Execute");
-    parts.push(JSON.stringify(currentStep, null, 2));
+    parts.push(JSON.stringify(safeStep, null, 2));
     parts.push("");
 
     // Add execution history section
     parts.push("# Execution History");
-    if (executionHistory.length > 0) {
-        parts.push(formatExecutionHistory(executionHistory));
+    if (safeHistory.length > 0) {
+        parts.push(formatExecutionHistory(safeHistory));
 
         // Add note if history was summarized
-        const hasSummary = executionHistory.some(h => h.isMeta);
+        const hasSummary = safeHistory.some(h => h && h.isMeta);
         if (hasSummary) {
             parts.push("");
             parts.push("[Note: Earlier entries have been summarized to save context]");
@@ -64,15 +69,37 @@ function formatExecutionHistory(history) {
         .map((h, i) => {
             // Skip numbering for meta entries (summaries)
             if (h.isMeta) {
-                return h.content;
+                return h.content || "";
             }
 
-            let contentStr =
-                typeof h.content === "string"
-                    ? h.content
-                    : JSON.stringify(h.content, null, 2);
+            // Defensive check: ensure h has required properties
+            if (!h) {
+                return `${i + 1}. [UNKNOWN] Invalid history entry`;
+            }
 
-            return `${i + 1}. [${h.type}] ${contentStr}`;
+            const type = h.type || "UNKNOWN";
+            let contentStr = "";
+
+            try {
+                if (typeof h.content === "string") {
+                    contentStr = h.content;
+                } else if (h.content !== null && h.content !== undefined) {
+                    contentStr = JSON.stringify(h.content, null, 2);
+                } else {
+                    contentStr = "No content";
+                }
+            } catch (error) {
+                // 详细错误定位信息
+                console.error("[ERROR] formatExecutionHistory failed at entry", i, {
+                    entryType: type,
+                    contentType: typeof h.content,
+                    error: error.message,
+                    stack: error.stack,
+                });
+                contentStr = `[Error formatting content: ${error.message}]`;
+            }
+
+            return `${i + 1}. [${type}] ${contentStr}`;
         })
         .join("\n\n");
 }
@@ -83,9 +110,41 @@ function formatExecutionHistory(history) {
  * @returns {string} - Initial observation
  */
 export function generateInitialObservation(currentStep) {
-    return `Starting execution of step: "${currentStep.goal}".
-Success criteria: ${JSON.stringify(currentStep.success_criteria)}
-Constraints: ${JSON.stringify(currentStep.constraints || "none")}`;
+    if (!currentStep) {
+        return "Starting execution of step: (no step information available)";
+    }
+
+    const goal = currentStep.goal || "(no goal specified)";
+    const successCriteria = currentStep.success_criteria || "(no criteria specified)";
+    const constraints = currentStep.constraints || "none";
+
+    let successCriteriaStr, constraintsStr;
+
+    try {
+        successCriteriaStr = JSON.stringify(successCriteria);
+    } catch (error) {
+        console.error("[ERROR] JSON.stringify(success_criteria) failed:", {
+            value: successCriteria,
+            error: error.message,
+            stack: error.stack,
+        });
+        successCriteriaStr = String(successCriteria);
+    }
+
+    try {
+        constraintsStr = JSON.stringify(constraints);
+    } catch (error) {
+        console.error("[ERROR] JSON.stringify(constraints) failed:", {
+            value: constraints,
+            error: error.message,
+            stack: error.stack,
+        });
+        constraintsStr = String(constraints);
+    }
+
+    return `Starting execution of step: "${goal}".
+Success criteria: ${successCriteriaStr}
+Constraints: ${constraintsStr}`;
 }
 
 export default {

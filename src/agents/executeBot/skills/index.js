@@ -42,7 +42,9 @@ export class SkillLoader {
                     withFileTypes: true,
                 });
                 for (const entry of entries) {
-                    if (entry.isDirectory() && !entry.name.startsWith("_")) {
+                    if (entry.isDirectory() &&
+                        !entry.name.startsWith("_") &&
+                        entry.name !== "templates") {  // 过滤 templates 目录
                         skills.push({
                             id: `${category}/${entry.name}`,
                             path: join(categoryPath, entry.name),

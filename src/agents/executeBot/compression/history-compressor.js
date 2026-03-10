@@ -229,19 +229,41 @@ export class HistoryCompressor {
 
         return entries
             .map((h, i) => {
-                let contentStr =
-                    typeof h.content === "string"
-                        ? h.content
-                        : JSON.stringify(h.content, null, 2);
-
-                // Truncate if too long
-                if (contentStr.length > this.config.maxContentLength) {
-                    contentStr =
-                        contentStr.substring(0, this.config.maxContentLength) +
-                        `...[truncated, total ${contentStr.length} chars]`;
+                // Defensive check for invalid entries
+                if (!h) {
+                    return `${i + 1}. [UNKNOWN] Invalid entry`;
                 }
 
-                return `${i + 1}. [${h.type}] ${contentStr}`;
+                const type = h.type || "UNKNOWN";
+                let contentStr = "";
+
+                try {
+                    if (typeof h.content === "string") {
+                        contentStr = h.content;
+                    } else if (h.content !== null && h.content !== undefined) {
+                        contentStr = JSON.stringify(h.content, null, 2);
+                    } else {
+                        contentStr = "No content";
+                    }
+
+                    // Truncate if too long
+                    if (contentStr.length > this.config.maxContentLength) {
+                        contentStr =
+                            contentStr.substring(0, this.config.maxContentLength) +
+                            `...[truncated, total ${contentStr.length} chars]`;
+                    }
+                } catch (error) {
+                    // 详细错误定位信息
+                    console.error("[ERROR] HistoryCompressor.formatFullHistory failed at index", i, {
+                        entryType: type,
+                        contentType: typeof h.content,
+                        error: error.message,
+                        stack: error.stack,
+                    });
+                    contentStr = `[Error formatting: ${error.message}]`;
+                }
+
+                return `${i + 1}. [${type}] ${contentStr}`;
             })
             .join("\n\n");
     }
@@ -260,22 +282,39 @@ export class HistoryCompressor {
             .map((h, i) => {
                 // Meta entries (summaries) don't need numbering
                 if (h.isMeta) {
-                    return h.content;
+                    return h.content || "";
                 }
 
-                let contentStr =
-                    typeof h.content === "string"
-                        ? h.content
-                        : JSON.stringify(h.content, null, 2);
+                const type = h.type || "UNKNOWN";
+                let contentStr = "";
 
-                // Truncate if too long
-                if (contentStr.length > this.config.maxContentLength) {
-                    contentStr =
-                        contentStr.substring(0, this.config.maxContentLength) +
-                        `...[truncated, total ${contentStr.length} chars]`;
+                try {
+                    if (typeof h.content === "string") {
+                        contentStr = h.content;
+                    } else if (h.content !== null && h.content !== undefined) {
+                        contentStr = JSON.stringify(h.content, null, 2);
+                    } else {
+                        contentStr = "No content";
+                    }
+
+                    // Truncate if too long
+                    if (contentStr.length > this.config.maxContentLength) {
+                        contentStr =
+                            contentStr.substring(0, this.config.maxContentLength) +
+                            `...[truncated, total ${contentStr.length} chars]`;
+                    }
+                } catch (error) {
+                    // 详细错误定位信息
+                    console.error("[ERROR] HistoryCompressor.formatCompressedHistory failed at index", i, {
+                        entryType: type,
+                        contentType: typeof h.content,
+                        error: error.message,
+                        stack: error.stack,
+                    });
+                    contentStr = `[Error formatting: ${error.message}]`;
                 }
 
-                return `${i + 1}. [${h.type}] ${contentStr}`;
+                return `${i + 1}. [${type}] ${contentStr}`;
             })
             .join("\n\n");
     }

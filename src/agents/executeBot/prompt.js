@@ -22,37 +22,64 @@ function getSkillsDocumentation() {
  * @returns {string} - The system prompt
  */
 export function prompt(scope, currentStep, executionHistory = []) {
+    // Defensive check: ensure executionHistory is an array
+    const safeHistory = Array.isArray(executionHistory) ? executionHistory : [];
+    const safeScope = scope || {};
+    const safeStep = currentStep || {};
+
     // Format execution history with truncation to prevent context overflow
     const MAX_CONTENT_LENGTH = 1500; // Max chars per history entry
     const MAX_HISTORY_ENTRIES = 15; // Max number of history entries to include
 
-    const truncatedHistory = executionHistory.slice(-MAX_HISTORY_ENTRIES);
+    const truncatedHistory = safeHistory.slice(-MAX_HISTORY_ENTRIES);
 
     const historyStr =
         truncatedHistory.length > 0
             ? truncatedHistory
                   .map((h, i) => {
-                      let contentStr =
-                          typeof h.content === "string"
-                              ? h.content
-                              : JSON.stringify(h.content, null, 2);
-
-                      // Truncate if too long
-                      if (contentStr.length > MAX_CONTENT_LENGTH) {
-                          contentStr =
-                              contentStr.substring(0, MAX_CONTENT_LENGTH) +
-                              `...[truncated, total ${contentStr.length} chars]`;
+                      // Defensive check for invalid history entries
+                      if (!h) {
+                          return `${i + 1}. [UNKNOWN] Invalid entry`;
                       }
 
-                      return `${i + 1}. [${h.type}] ${contentStr}`;
+                      const type = h.type || "UNKNOWN";
+                      let contentStr = "";
+
+                      try {
+                          if (typeof h.content === "string") {
+                              contentStr = h.content;
+                          } else if (h.content !== null && h.content !== undefined) {
+                              contentStr = JSON.stringify(h.content, null, 2);
+                          } else {
+                              contentStr = "No content";
+                          }
+
+                          // Truncate if too long
+                          if (contentStr.length > MAX_CONTENT_LENGTH) {
+                              contentStr =
+                                  contentStr.substring(0, MAX_CONTENT_LENGTH) +
+                                  `...[truncated, total ${contentStr.length} chars]`;
+                          }
+                      } catch (error) {
+                          // 详细错误定位信息
+                          console.error("[ERROR] prompt.js: format history entry failed at index", i, {
+                              entryType: type,
+                              contentType: typeof h.content,
+                              error: error.message,
+                              stack: error.stack,
+                          });
+                          contentStr = `[Error formatting: ${error.message}]`;
+                      }
+
+                      return `${i + 1}. [${type}] ${contentStr}`;
                   })
                   .join("\n\n")
             : "(no previous actions)";
 
     // Add note if history was truncated
     const historyNote =
-        executionHistory.length > MAX_HISTORY_ENTRIES
-            ? `\n[Note: History truncated from ${executionHistory.length} to ${MAX_HISTORY_ENTRIES} most recent entries]`
+        safeHistory.length > MAX_HISTORY_ENTRIES
+            ? `\n[Note: History truncated from ${safeHistory.length} to ${MAX_HISTORY_ENTRIES} most recent entries]`
             : "";
 
     // Get skills documentation
@@ -75,10 +102,10 @@ Execute ONE specific step from the analysis plan by:
 4. Continuing until the step's success criteria are met
 
 # Current Analysis Scope
-${JSON.stringify(scope, null, 2)}
+${JSON.stringify(safeScope, null, 2)}
 
 # Current Step to Execute
-${JSON.stringify(currentStep, null, 2)}
+${JSON.stringify(safeStep, null, 2)}
 
 # Execution History
 ${historyStr}${historyNote}
@@ -213,25 +240,68 @@ Now, based on the current scope and step, think carefully and output your next a
  * @returns {Object} - Formatted observation
  */
 export function formatObservation(result, skillName) {
-    if (result.status === "1" || result.message === "OK") {
-        return {
-            type: "OBSERVATION",
-            content: {
-                skill: skillName,
-                success: true,
-                data: result.result,
-                count: Array.isArray(result.result)
-                    ? result.result.length
-                    : null,
-            },
-        };
-    } else {
+    // Defensive check for null/undefined result
+    if (!result) {
+        console.error("[ERROR] formatObservation: result is null/undefined", {
+            skillName,
+        });
         return {
             type: "OBSERVATION",
             content: {
                 skill: skillName,
                 success: false,
-                error: result.message || result.result || "Unknown error",
+                error: "No result returned from skill",
+            },
+        };
+    }
+
+    const isSuccess = result.status === "1" || result.message === "OK";
+
+    if (isSuccess) {
+        // Get data safely
+        const data = result.result !== undefined ? result.result : null;
+
+        // Count safely (only for arrays)
+        let count = null;
+        if (Array.isArray(data)) {
+            count = data.length;
+        }
+
+        return {
+            type: "OBSERVATION",
+            content: {
+                skill: skillName,
+                success: true,
+                data: data,
+                count: count,
+            },
+        };
+    } else {
+        // Format error message safely
+        let errorMsg = "Unknown error";
+        if (result.message) {
+            errorMsg = result.message;
+        } else if (result.result !== undefined) {
+            try {
+                errorMsg = typeof result.result === 'string'
+                    ? result.result
+                    : JSON.stringify(result.result);
+            } catch (error) {
+                console.error("[ERROR] formatObservation: failed to stringify result.result", {
+                    skillName,
+                    error: error.message,
+                    stack: error.stack,
+                });
+                errorMsg = String(result.result);
+            }
+        }
+
+        return {
+            type: "OBSERVATION",
+            content: {
+                skill: skillName,
+                success: false,
+                error: errorMsg,
             },
         };
     }

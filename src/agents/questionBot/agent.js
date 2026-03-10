@@ -60,7 +60,7 @@ export class QuestionAgent {
         return {
             totalFields,
             filledFields,
-            isRichEnough: this.isInfoRichEnough()
+            isRichEnough: this.isInfoRichEnough(),
         };
     }
 
@@ -94,14 +94,16 @@ export class QuestionAgent {
             if (result === "DONE") {
                 // 验证收集完成
                 if (!this.isComplete()) {
-                    throw new Error('信息收集未完成。缺少必要字段。');
+                    throw new Error("信息收集未完成。缺少必要字段。");
                 }
                 return this.infos;
             }
         }
 
         // 如果没有初始输入或收集未完成，抛出错误
-        throw new Error('信息收集需要用户输入。请提供 initialInput 或使用交互式模式。');
+        throw new Error(
+            "信息收集需要用户输入。请提供 initialInput 或使用交互式模式。"
+        );
     }
 
     /**
@@ -135,7 +137,11 @@ export class QuestionAgent {
             // 如果有事件发射器，使用事件
             if (this._eventEmitter) {
                 this._inputResolver = resolve;
-                this._eventEmitter.emit('question', { question, resolve, reject });
+                this._eventEmitter.emit("question", {
+                    question,
+                    resolve,
+                    reject,
+                });
                 return;
             }
 
@@ -147,7 +153,7 @@ export class QuestionAgent {
                 });
             }
 
-            this.rl.question(question + '\n', (answer) => {
+            this.rl.question(question + "\n", (answer) => {
                 resolve(answer);
             });
         });
@@ -184,7 +190,7 @@ export class QuestionAgent {
             modelProvider: "deepseek",
         });
 
-        console.log("Thought & Action:", JSON.stringify(res, null, 2));
+        //console.log("Thought & Action:", JSON.stringify(res, null, 2));
 
         // 提取解析后的动作数据
         const action = res.data || res;
@@ -205,7 +211,9 @@ export class QuestionAgent {
 
                 // 使用新的等待用户输入机制
                 try {
-                    const answer = await this._waitForUserInput(action.question);
+                    const answer = await this._waitForUserInput(
+                        action.question
+                    );
                     return await this.react(`用户回答: ${answer}`);
                 } catch (error) {
                     console.error("获取用户输入失败:", error.message);
@@ -271,7 +279,9 @@ export class QuestionAgent {
      * @deprecated Use collectRequirements() instead
      */
     async run() {
-        console.warn("⚠️  DEPRECATED: QuestionAgent.run() is deprecated. Use collectRequirements() instead.");
+        console.warn(
+            "⚠️  DEPRECATED: QuestionAgent.run() is deprecated. Use collectRequirements() instead."
+        );
         console.log("问答模块启动 (ReAct 模式)");
         console.log("请输入你的问题：");
 

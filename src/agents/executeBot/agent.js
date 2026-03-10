@@ -203,6 +203,12 @@ export class ExecuteAgent {
      * ReAct core loop - Reasoning + Acting
      */
     async react(observation) {
+        // Defensive check: ensure executionHistory is an array
+        if (!Array.isArray(this.executionHistory)) {
+            console.warn("[ExecuteAgent] executionHistory is not an array, initializing");
+            this.executionHistory = [];
+        }
+
         // Filter out observations with undefined or null content (failed skill lookups)
         if (observation === undefined || observation === null) {
             console.log("[ExecuteAgent] Skipping undefined/null observation");
@@ -268,11 +274,39 @@ export class ExecuteAgent {
                     console.log(`[ExecuteAgent] Compression stats: ${stats.savedPercent}% saved (${stats.totalSavedTokens} tokens)`);
                 }
             } catch (error) {
+                // 详细错误定位信息
+                console.error("[ERROR] ExecuteAgent.react: Compression failed", {
+                    error: error.message,
+                    stack: error.stack,
+                });
                 console.warn("[ExecuteAgent] Compression failed, falling back to legacy mode:", error.message);
                 this.useLegacyPrompt = true;
                 systemPrompt = prompt(this.scope, this.currentStep, this.executionHistory);
-                userMessageText = observation;
+                // Ensure observation is valid, otherwise use fallback message
+                userMessageText = (typeof observation === 'string') ? observation : "Starting new execution after compression error";
             }
+        }
+
+        // Validate systemPrompt before calling LLM
+        if (!systemPrompt || typeof systemPrompt !== 'string') {
+            console.error("[ExecuteAgent] Invalid systemPrompt:", typeof systemPrompt, "value:", systemPrompt);
+            return {
+                status: "failure",
+                reason: "Invalid system prompt generated",
+                scope: this.scope,
+                history: this.executionHistory,
+            };
+        }
+
+        // Validate userMessageText before calling LLM
+        if (!userMessageText || typeof userMessageText !== 'string') {
+            console.error("[ExecuteAgent] Invalid userMessageText:", typeof userMessageText, "value:", userMessageText);
+            return {
+                status: "failure",
+                reason: "Invalid user message generated",
+                scope: this.scope,
+                history: this.executionHistory,
+            };
         }
 
         // Call LLM for next action
@@ -288,8 +322,29 @@ export class ExecuteAgent {
             JSON.stringify(res, null, 2)
         );
 
-        // Extract parsed action
+        // Extract parsed action with validation
         const action = res.data || res;
+
+        // Validate action has required fields
+        if (!action) {
+            console.error("[ExecuteAgent] LLM returned null/undefined action");
+            return {
+                status: "failure",
+                reason: "LLM returned null or undefined action",
+                scope: this.scope,
+                history: this.executionHistory,
+            };
+        }
+
+        if (!action.action_type) {
+            console.error("[ExecuteAgent] Action missing required 'action_type' field:", action);
+            return {
+                status: "failure",
+                reason: "Action missing required 'action_type' field",
+                scope: this.scope,
+                history: this.executionHistory,
+            };
+        }
 
         // Record action in history
         this.executionHistory.push({
@@ -328,11 +383,29 @@ export class ExecuteAgent {
                 // Continue ReAct loop with observation
                 // Truncate if too long to prevent context overflow
                 const MAX_OBSERVATION_LENGTH = 8000;
-                let resultStr = JSON.stringify(result.content, null, 2);
-                if (resultStr.length > MAX_OBSERVATION_LENGTH) {
-                    resultStr =
-                        resultStr.substring(0, MAX_OBSERVATION_LENGTH) +
-                        `\n...[truncated, total ${resultStr.length} chars]`;
+                let resultStr;
+
+                try {
+                    if (result.content !== null && result.content !== undefined) {
+                        resultStr = JSON.stringify(result.content, null, 2);
+                    } else {
+                        resultStr = "No content returned";
+                    }
+
+                    if (resultStr.length > MAX_OBSERVATION_LENGTH) {
+                        resultStr =
+                            resultStr.substring(0, MAX_OBSERVATION_LENGTH) +
+                            `\n...[truncated, total ${resultStr.length} chars]`;
+                    }
+                } catch (error) {
+                    // 详细错误定位信息
+                    console.error("[ERROR] ExecuteAgent: Failed to format skill result", {
+                        skillName,
+                        contentType: typeof result.content,
+                        error: error.message,
+                        stack: error.stack,
+                    });
+                    resultStr = `[Error formatting result: ${error.message}]`;
                 }
 
                 return await this.react(`Skill ${skill_name} result:\n${resultStr}`);
