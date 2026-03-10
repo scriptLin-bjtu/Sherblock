@@ -334,14 +334,26 @@ ${contextJson}`,
             // 提取报告内容
             const report = res.data || res;
 
-            // 如果返回的是字符串，直接使用；否则尝试获取 report 字段或转换为字符串
+            // 如果返回的是字符串，直接使用
             if (typeof report === "string") {
                 return report;
-            } else if (report.report) {
-                return report.report;
-            } else {
-                return JSON.stringify(report, null, 2);
             }
+
+            // DeepSeek Reasoner 格式: {content: string, reasoning_content: string, usage: object}
+            if (report.content && typeof report.content === "string") {
+                console.log("[ReportSkill] Extracted content from DeepSeek Reasoner format");
+                return report.content;
+            }
+
+            // 标准格式: {report: string}
+            if (report.report && typeof report.report === "string") {
+                console.log("[ReportSkill] Extracted report.report field");
+                return report.report;
+            }
+
+            // Fallback: 尝试序列化
+            console.log("[ReportSkill] Fallback to JSON.stringify");
+            return JSON.stringify(report, null, 2);
         } catch (error) {
             console.error(
                 "[ReportSkill] Failed to generate report:",

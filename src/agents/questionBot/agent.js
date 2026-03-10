@@ -207,7 +207,7 @@ export class QuestionAgent {
         switch (action.action_type) {
             case "ASK":
                 // 向用户提问
-                console.log("问题:", action.question);
+                //console.log("问题:", action.question);
 
                 // 使用新的等待用户输入机制
                 try {
