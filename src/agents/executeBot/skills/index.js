@@ -3,7 +3,7 @@
  */
 
 import { readdir } from "fs/promises";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -32,6 +32,7 @@ export class SkillLoader {
             "block",
             "nametag",
             "chart",
+            "report",
         ];
 
         for (const category of categories) {
@@ -59,12 +60,14 @@ export class SkillLoader {
         return skills;
     }
 
-    async loadSkill(skillPath) {
+    async loadSkill(skillPath, basePath) {
         if (this.cache.has(skillPath)) return this.cache.get(skillPath);
 
         const indexPath = join(skillPath, "index.js");
         // Convert to file:// URL for Windows compatibility
-        const fileUrl = new URL(`file://${indexPath.replace(/\\/g, "/")}`).href;
+        const absolutePath = resolve(indexPath);
+        const normalizedPath = absolutePath.replace(/\\/g, "/");
+        const fileUrl = `file:///${normalizedPath}`;
         const module = await import(fileUrl);
         const skill = module.default || module;
 
@@ -128,11 +131,13 @@ export class SkillRegistry {
     async initialize(basePath = __dirname) {
         if (this.initialized) return;
 
-        const discovered = await this.loader.discoverSkills(basePath);
+        // Convert to absolute path for Windows compatibility
+        const absoluteBasePath = resolve(basePath);
+        const discovered = await this.loader.discoverSkills(absoluteBasePath);
 
         for (const { path, category } of discovered) {
             try {
-                const skill = await this.loader.loadSkill(path);
+                const skill = await this.loader.loadSkill(path, basePath);
                 this.skills.set(skill.name, {
                     name: skill.name,
                     description: skill.description,
@@ -305,6 +310,7 @@ export class SkillRegistry {
             block: "## Block Analysis\n- Get block information by timestamp",
             nametag: "## Address Metadata\n- Get address tags and labels",
             chart: "## Data Visualization\n- Generate line charts for trends and time series\n- Create bar charts for comparisons\n- Produce pie charts for distribution analysis\n- Generate scatter charts for relationship analysis\n- Create radar charts for multi-dimensional comparison\n- Produce area charts to emphasize quantity changes\n- Create mixed charts combining multiple chart types\n- Generate heatmap charts for matrix density visualization\n- Create gauge charts for key metric display\n- Produce funnel charts for conversion rate analysis\n- Create custom charts with full ECharts configuration\n- Support SVG, PNG, JPEG, and WebP export formats\n- Support light and dark themes",
+            report: "## Report Generation\n- Generate structured markdown analysis reports from workflow context\n- Summarize blockchain analysis results with professional formatting\n- Create comprehensive reports including summary, goals, execution plan, key findings, detailed analysis, and conclusions",
             basic: "## Basic Operations\n- Query basic blockchain data",
         };
 

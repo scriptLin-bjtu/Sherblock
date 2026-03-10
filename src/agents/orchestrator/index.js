@@ -140,6 +140,9 @@ export class AgentOrchestrator {
             // Phase 3: Execute with review
             const result = await this._executeWithReview();
 
+            // Phase 4: Generate report
+            const report = await this._generateReport();
+
             // Complete workflow - pass full context for guard check
             await this.stateMachine.transition(WorkflowStage.COMPLETED, {
                 plan: this.workflowState.plan,
@@ -147,9 +150,9 @@ export class AgentOrchestrator {
                 currentStepIndex: this.workflowState.currentStepIndex
             });
 
-            this._emit('workflow:completed', result);
+            this._emit('workflow:completed', { result, report });
 
-            return result;
+            return { result, report };
 
         } catch (error) {
             this._emit('workflow:error', { error: error.message, stack: error.stack });
@@ -383,6 +386,71 @@ export class AgentOrchestrator {
                 reason: 'Review error, defaulting to continue',
                 nextStepRecommendation: 'continue'
             };
+        }
+    }
+
+    /**
+     * Generate analysis report from workflow context using the report skill
+     * @private
+     */
+    async _generateReport() {
+        this._emit('report:generation:started', {});
+
+        try {
+            // 准备技能参数
+            const params = {
+                scope: this.workflowState.scope,
+                plan: this.workflowState.plan,
+                executionHistory: this.workflowState.executionHistory,
+                reviewResults: this.workflowState.reviewResults
+            };
+
+            // 直接导入报告生成技能模块并调用
+            const reportSkillPath = new URL('../executeBot/skills/report/generate-report/index.js', import.meta.url).href;
+            const reportSkill = await import(reportSkillPath);
+
+            const context = {
+                apiKey: process.env.ETHERSCAN_API_KEY,
+                chainId: this.workflowState.scope?.chain || '1' // 默认 Ethereum
+            };
+
+            const report = await reportSkill.default.execute(params, context);
+
+            this._emit('report:generation:completed', { report });
+            return report;
+        } catch (error) {
+            this._emit('report:generation:error', { error: error.message, stack: error.stack });
+            console.error('[Orchestrator] Report generation failed:', error);
+
+            // 生成简单的错误报告
+            const timestamp = new Date().toISOString();
+            return `# 区块链分析报告
+
+**生成时间**: ${timestamp}
+
+---
+
+## 摘要
+
+报告生成失败。以下为简化的分析摘要。
+
+---
+
+## 分析目标
+
+${this.workflowState.scope?.goal || "分析目标未明确指定"}
+
+---
+
+## 错误信息
+
+${error.message}
+
+---
+
+请联系系统管理员或重试分析。
+
+`;
         }
     }
 

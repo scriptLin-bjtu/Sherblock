@@ -41,6 +41,18 @@ orchestrator.on('workflow:completed', (data) => {
     console.log('[Orchestrator] Workflow completed');
 });
 
+orchestrator.on('report:generation:started', () => {
+    console.log('[Orchestrator] Report generation started');
+});
+
+orchestrator.on('report:generation:completed', (data) => {
+    console.log('[Orchestrator] Report generation completed');
+});
+
+orchestrator.on('report:generation:error', (data) => {
+    console.error('[Orchestrator] Report generation error:', data.error);
+});
+
 orchestrator.on('workflow:error', (data) => {
     console.error('[Orchestrator] Workflow error:', data.error);
 });
@@ -68,8 +80,39 @@ async function main() {
         }
 
         // Start the orchestrator with the user input
-        const result = await orchestrator.run(initialInput);
-        console.log('\n最终结果:', result);
+        const { result, report } = await orchestrator.run(initialInput);
+
+        console.log('\n===== 分析完成 =====');
+        console.log('执行结果:', result);
+
+        // Display the report
+        if (report) {
+            console.log('\n===== 分析报告 =====\n');
+            console.log(report);
+            console.log('\n===== 报告结束 =====\n');
+
+            // Save report to file
+            const fs = await import('node:fs/promises');
+            const path = await import('node:path');
+
+            // Ensure data directory exists
+            const dataDir = path.join(process.cwd(), 'data');
+            try {
+                await fs.mkdir(dataDir, { recursive: true });
+            } catch (err) {
+                // Directory may already exist
+            }
+
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const reportPath = path.join(dataDir, `report-${timestamp}.md`);
+
+            try {
+                await fs.writeFile(reportPath, report, 'utf-8');
+                console.log(`\n✅ 报告已保存到: ${reportPath}`);
+            } catch (err) {
+                console.error(`\n❌ 保存报告失败: ${err.message}`);
+            }
+        }
 
         rl.close();
         await logger.close();
