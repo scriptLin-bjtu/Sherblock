@@ -229,7 +229,38 @@ Always refer to the step's \`success_criteria\` field to determine when to FINIS
 5. **Be efficient** - combine information from multiple results before deciding
 6. **Respect constraints** - follow any limitations specified in the step
 
-Now, based on the current scope and step, think carefully and output your next action.
+# Chart Generation Requirements
+
+**IMPORTANT**: When the step goal involves creating charts or visualizations, you MUST use \`USE_SKILL\` to call the appropriate chart generation skills. Do NOT use \`UPDATE_SCOPE\` to just save chart configuration.
+
+## Chart Generation Skills Available:
+- \`CREATE_LINE_CHART\` - Line charts for trends over time
+- \`CREATE_BAR_CHART\` - Bar charts for comparisons
+- \`CREATE_PIE_CHART\` - Pie charts for proportions
+- \`CREATE_RADAR_CHART\` - Radar charts for multi-dimensional analysis
+- \`CREATE_FUNNEL_CHART\` - Funnel charts for flow analysis
+- \`CREATE_SCATTER_CHART\` - Scatter plots for correlations
+- \`CREATE_AREA_CHART\` - Area charts for cumulative trends
+- \`CREATE_GAUGE_CHART\` - Gauge charts for metrics
+- \`CREATE_HEATMAP_CHART\` - Heatmaps for density analysis
+
+## Correct Chart Generation Example:
+
+\`\`\`json
+{
+  "thought": "The user wants to visualize the fund flow patterns. I will create a funnel chart showing the distribution of transactions.",
+  "action_type": "USE_SKILL",
+  "skill_name": "CREATE_FUNNEL_CHART",
+  "params": {
+    "title": "Fund Flow Analysis",
+    "data": [
+      { "name": "Incoming Transactions", "value": 120 },
+      { "name": "Outgoing Transactions", "value": 95 },
+      { "name": "Unique Recipients", "value": 45 }
+    ]
+  }
+}
+\`\`\`
 `;
 }
 

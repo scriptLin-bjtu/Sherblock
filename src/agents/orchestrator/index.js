@@ -408,6 +408,9 @@ export class AgentOrchestrator {
         this._emit('report:generation:started', {});
 
         try {
+            // 检查是否需要生成图表
+            await this._checkAndGenerateCharts();
+
             // 准备技能参数
             const params = {
                 scope: this.workflowState.scope,
@@ -462,6 +465,169 @@ ${error.message}
 请联系系统管理员或重试分析。
 
 `;
+        }
+    }
+
+    /**
+     * Check if visualization data exists and generate charts if needed
+     * @private
+     */
+    async _checkAndGenerateCharts() {
+        const scope = this.workflowState.scope;
+        const executionHistory = this.workflowState.executionHistory;
+
+        // 检查是否已经生成过图表 (通过 USE_SKILL 调用或 scope 中的图表文件路径)
+        const hasGeneratedCharts = executionHistory?.some(entry => {
+            const actions = entry.result?.history?.filter(h => h.action) || [];
+            return actions.some(a => a.action?.type === 'USE_SKILL' &&
+                (a.action.params?.skill_name?.includes('CHART') || a.action.params?.skill?.includes('CHART')));
+        }) || (scope?.generated_charts && Object.keys(scope.generated_charts).length > 0);
+
+        if (hasGeneratedCharts) {
+            console.log('[Orchestrator] Charts already generated, skipping');
+            return;
+        }
+
+        // 检查是否有可视化数据
+        const hasVisualizationData =
+            (scope?.normal_transactions && scope.normal_transactions.length > 0) ||
+            (scope?.transactions && scope.transactions.length > 0) ||
+            (scope?.visualization_data);
+
+        if (!hasVisualizationData) {
+            console.log('[Orchestrator] No visualization data found, skipping chart generation');
+            return;
+        }
+
+        console.log('[Orchestrator] Visualization data found, generating charts...');
+
+        try {
+            // 生成图表
+            await this._generateFundFlowChart(scope);
+            await this._generateTransactionHistoryChart(scope);
+
+        } catch (error) {
+            console.warn('[Orchestrator] Chart generation failed:', error.message);
+            // 不中断流程，继续生成报告
+        }
+    }
+
+    /**
+     * Generate fund flow chart
+     * @private
+     */
+    async _generateFundFlowChart(scope) {
+        const transactions = scope.normal_transactions || scope.transactions || [];
+        if (transactions.length === 0) {
+            return;
+        }
+
+        try {
+            const funnelSkillPath = new URL('../executeBot/skills/chart/create-funnel-chart/index.js', import.meta.url).href;
+            const funnelSkill = await import(funnelSkillPath);
+
+            // 准备漏斗数据
+            const uniqueSenders = new Set(transactions.map(tx => tx.from || tx.sender)).size;
+            const uniqueRecipients = new Set(transactions.map(tx => tx.to || tx.recipient)).size;
+            const tokenTransfers = scope.token_transfers?.length || 0;
+
+            const data = [
+                { name: 'Unique Senders', value: uniqueSenders },
+                { name: 'Unique Recipients', value: uniqueRecipients },
+                { name: 'Total Transactions', value: transactions.length }
+            ];
+
+            if (tokenTransfers > 0) {
+                data.push({ name: 'Token Transfers', value: tokenTransfers });
+            }
+
+            const result = await funnelSkill.default.execute({
+                title: 'Fund Flow Analysis',
+                data: data,
+            }, {});
+
+            // 保存图表路径到 scope
+            if (result.status === 'success' && result.filePath) {
+                if (!this.workflowState.scope.generated_charts) {
+                    this.workflowState.scope.generated_charts = {};
+                }
+                this.workflowState.scope.generated_charts['create-funnel-chart'] = {
+                    file: result.filePath,
+                    description: '资金流分析图表',
+                    skillName: 'CREATE_FUNNEL_CHART'
+                };
+                console.log('[Orchestrator] Fund flow chart generated and saved to:', result.filePath);
+            }
+        } catch (error) {
+            console.error('[Orchestrator] Failed to generate fund flow chart:', error.message);
+        }
+    }
+
+    /**
+     * Generate transaction history chart
+     * @private
+     */
+    async _generateTransactionHistoryChart(scope) {
+        const transactions = scope.normal_transactions || scope.transactions || [];
+        if (transactions.length === 0) {
+            return;
+        }
+
+        try {
+            const lineSkillPath = new URL('../executeBot/skills/chart/create-line-chart/index.js', import.meta.url).href;
+            const lineSkill = await import(lineSkillPath);
+
+            // 按时间排序并分组
+            const sortedTx = [...transactions].sort((a, b) => {
+                const timeA = a.timestamp || a.time || 0;
+                const timeB = b.timestamp || b.time || 0;
+                return timeA - timeB;
+            });
+
+            const dailyVolume = {};
+            const dailyCount = {};
+
+            for (const tx of sortedTx) {
+                const timestamp = tx.timestamp || tx.time || 0;
+                const date = new Date(timestamp * 1000);
+                const dateKey = date.toISOString().split('T')[0];
+
+                const value = tx.value ? parseFloat(tx.value) / 1e18 : 0;
+                dailyVolume[dateKey] = (dailyVolume[dateKey] || 0) + value;
+                dailyCount[dateKey] = (dailyCount[dateKey] || 0) + 1;
+            }
+
+            const dates = Object.keys(dailyVolume).sort();
+            if (dates.length === 0) {
+                return;
+            }
+
+            const volumeData = dates.map(d => dailyVolume[d]);
+            const countData = dates.map(d => dailyCount[d]);
+
+            const result = await lineSkill.default.execute({
+                title: 'Transaction History',
+                xAxis: dates,
+                series: [
+                    { name: 'Transaction Volume (ETH)', data: volumeData },
+                    { name: 'Transaction Count', data: countData }
+                ],
+            }, {});
+
+            // 保存图表路径到 scope
+            if (result.status === 'success' && result.filePath) {
+                if (!this.workflowState.scope.generated_charts) {
+                    this.workflowState.scope.generated_charts = {};
+                }
+                this.workflowState.scope.generated_charts['create-line-chart'] = {
+                    file: result.filePath,
+                    description: '交易历史趋势图表',
+                    skillName: 'CREATE_LINE_CHART'
+                };
+                console.log('[Orchestrator] Transaction history chart generated and saved to:', result.filePath);
+            }
+        } catch (error) {
+            console.error('[Orchestrator] Failed to generate transaction history chart:', error.message);
         }
     }
 

@@ -163,6 +163,55 @@ Always refer to the step's \`success_criteria\` field to determine when to FINIS
 - Use pagination for large result sets (default: 100 items per page)
 - Target the correct chain based on scope
 
+# Chart Generation Requirements
+
+**IMPORTANT**: When a step goal involves creating charts or visualizations, you MUST call \`USE_SKILL\` to execute chart generation skills. Do NOT simply create chart configuration objects and store them in scope.
+
+## Chart Generation Skills Available:
+- \`CREATE_FUNNEL_CHART\` - Funnel charts for flow analysis
+- \`CREATE_LINE_CHART\` - Line charts for trends over time
+- \`CREATE_BAR_CHART\` - Bar charts for comparisons
+- \`CREATE_PIE_CHART\` - Pie charts for proportions
+- \`CREATE_RADAR_CHART\` - Radar charts for multi-dimensional analysis
+- \`CREATE_SCATTER_CHART\` - Scatter plots for correlations
+- \`CREATE_AREA_CHART\` - Area charts for cumulative trends
+- \`CREATE_GAUGE_CHART\` - Gauge charts for metrics
+- \`CREATE_HEATMAP_CHART\` - Heatmaps for density analysis
+
+## Correct Chart Generation Example:
+
+\`\`\`json
+{
+  "thought": "I need to generate a fund flow visualization. I have prepared_fund_flow_data with inflow/outflow data. I'll create a funnel chart showing fund distribution.",
+  "action_type": "USE_SKILL",
+  "skill_name": "CREATE_FUNNEL_CHART",
+  "params": {
+    "title": "Fund Flow Analysis",
+    "data": [
+      { "name": "Total Inflow", "value": 100 },
+      { "name": "Total Outflow", "value": 75 }
+    ]
+  }
+}
+\`\`\`
+
+## Incorrect Pattern - DO NOT DO THIS:
+
+\`\`\`json
+{
+  "thought": "I'll create chart configuration and store it in scope",
+  "action_type": "UPDATE_SCOPE",
+  "updates": {
+    "generated_chart_fund_flow": {
+      "chart_type": "funnel",
+      "data": [...]
+    }
+  }
+}
+\`\`\`
+
+**The above pattern is incorrect because:** it only stores configuration but does NOT generate an actual image file that can be referenced in the report.
+
 # Important Rules
 1. **Output only one action at a time**
 2. **Output JSON only** - no markdown, no explanation outside JSON

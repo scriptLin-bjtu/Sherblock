@@ -113,6 +113,9 @@ const SKILL_ALIASES = {
     GET_LATEST_BLOCK: "ETH_BLOCK_NUMBER",
     GET_BLOCK_NUMBER: "ETH_BLOCK_NUMBER",
 
+    // Event logs skill alias
+    GET_EVENT_LOGS: "GET_TRANSACTION_LOGS",
+
     // Chart skill aliases
     CREATE_SCATTER: "CREATE_SCATTER_CHART",
     CREATE_RADAR: "CREATE_RADAR_CHART",
@@ -247,6 +250,7 @@ export class SkillRegistry {
         doc += "### Common Skill Name Aliases\n";
         doc += "The following aliases are also supported:\n";
         doc += "- `GET_NORMAL_TRANSACTIONS` → `GET_TRANSACTIONS`\n";
+        doc += "- `GET_EVENT_LOGS` → `GET_TRANSACTION_LOGS`\n";
         doc += "- `GET_CURRENT_BLOCK` → `ETH_BLOCK_NUMBER`\n";
         doc += "- `GET_LATEST_BLOCK` → `ETH_BLOCK_NUMBER`\n\n";
 

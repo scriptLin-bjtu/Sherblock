@@ -96,6 +96,41 @@ PLANNING PRINCIPLES
 - Avoid rigid deterministic flows
 
 --------------------------------
+VISUALIZATION PLANNING
+--------------------------------
+
+When the user request contains visualization requirements (keywords like "chart", "graph", "diagram", "visual", "plot"), you MUST include visualization steps after data collection:
+
+1. **Data Preparation Step**: After collecting data, include a step to prepare visualization data
+   - goal: Prepare visualization data from collected information
+   - rationale: Raw data needs to be transformed into visualization-ready formats
+   - success_criteria: Visualization data is organized in scope with structured formats
+
+2. **Chart Generation Steps**: Based on the type of analysis requested, include appropriate chart generation steps:
+   - For fund flow analysis: Add a step to generate fund flow visualization
+   - For transaction history: Add a step to generate transaction timeline chart
+   - For behavior profiles: Add a step to generate behavior comparison charts
+   - For time series data: Add a step to generate trend line charts
+   - For distribution analysis: Add a step to generate bar or pie charts
+
+3. **Report Generation**: The final report step should reference the generated visualizations
+
+**Chart Types Available**:
+- Line charts: for time series, trends, transaction history
+- Bar charts: for comparisons, distribution analysis
+- Pie charts: for proportional distribution
+- Funnel charts: for conversion rates, fund flow
+- Radar charts: for multi-dimensional behavior profiles
+- Scatter charts: for relationship analysis
+- Area charts: for emphasizing quantity changes
+
+**Visualization Data Format**:
+Prepare data in scope with these common patterns:
+- For line charts: use a scope variable like "prepared_time_series_data"
+- For funnel charts: use a scope variable like "fund_flow_chart_data"
+- For bar/pie charts: use a scope variable like "distribution_chart_data"
+
+--------------------------------
 OUTPUT FORMAT
 --------------------------------
 
