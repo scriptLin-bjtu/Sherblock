@@ -2,6 +2,7 @@ import readline from "node:readline";
 import { callLLM } from "./services/agent.js";
 import { AgentOrchestrator } from "./agents/orchestrator/index.js";
 import { logger } from "./utils/logger.js";
+import { workspaceManager } from "./utils/workspace-manager.js";
 
 // Create readline interface
 const rl = readline.createInterface({
@@ -60,7 +61,10 @@ orchestrator.on('workflow:error', (data) => {
 // Main entry point
 async function main() {
     try {
-        // Initialize logger
+        // Initialize workspace first (needed for logger)
+        await workspaceManager.initialize();
+
+        // Initialize logger (now uses workspace logs directory)
         const logFile = await logger.initialize();
         if (logFile) {
             console.log(`📝 Logging to: ${logFile}`);
@@ -91,20 +95,13 @@ async function main() {
             console.log(report);
             console.log('\n===== 报告结束 =====\n');
 
-            // Save report to file
+            // Save report to file using workspace
             const fs = await import('node:fs/promises');
             const path = await import('node:path');
 
-            // Ensure data directory exists
-            const dataDir = path.join(process.cwd(), 'data');
-            try {
-                await fs.mkdir(dataDir, { recursive: true });
-            } catch (err) {
-                // Directory may already exist
-            }
-
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const reportPath = path.join(dataDir, `report-${timestamp}.md`);
+            const reportsDir = workspaceManager.getReportsPath();
+            const reportPath = path.join(reportsDir, `report-${timestamp}.md`);
 
             try {
                 await fs.writeFile(reportPath, report, 'utf-8');

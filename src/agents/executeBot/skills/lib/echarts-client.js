@@ -8,7 +8,7 @@
 import { createCanvas } from 'canvas';
 import * as echarts from 'echarts';
 import { writeFile, mkdir } from 'fs/promises';
-import { dirname } from 'path';
+import { dirname, join, isAbsolute } from 'path';
 
 /**
  * Chart themes configuration
@@ -49,7 +49,7 @@ export function getTheme(themeName = 'light') {
 
 /**
  * Generate an ECharts chart and save as an image
- * @param {Object} option - ECharts configuration object
+ * @param {Object} option - - ECharts configuration object
  * @param {string} outputPath - Output file path
  * @param {Object} options - Options
  * @returns {Promise<Object>} Returns file path and chart info
@@ -60,11 +60,20 @@ export async function generateChart(option, outputPath, {
     height = 600,
     theme = 'light',
     colors = null,
-    backgroundColor = null
+    backgroundColor = null,
+    workspacePath = null
 } = {}) {
     try {
+        // Handle workspace path
+        let finalOutputPath = outputPath;
+        if (workspacePath && !isAbsolute(outputPath)) {
+            // Remove 'data/' prefix if present
+            const relativePath = outputPath.replace(/^data\//, '');
+            finalOutputPath = join(workspacePath, relativePath);
+        }
+
         // Ensure output directory exists
-        await mkdir(dirname(outputPath), { recursive: true });
+        await mkdir(dirname(finalOutputPath), { recursive: true });
 
         // Get theme configuration
         const themeConfig = getTheme(theme);
@@ -84,7 +93,7 @@ export async function generateChart(option, outputPath, {
 
         // Handle SVG format separately
         if (format === 'svg') {
-            return await generateSVGChart(mergedOption, outputPath, { width, height });
+            return await generateSVGChart(mergedOption, finalOutputPath, { width, height });
         }
 
         // Create canvas for raster formats
@@ -109,18 +118,18 @@ export async function generateChart(option, outputPath, {
         const buffer = canvas.toBuffer(formatMap[format] || 'image/png');
 
         // Write file
-        await writeFile(outputPath, buffer);
+        await writeFile(finalOutputPath, buffer);
 
         // Cleanup resources
         chart.dispose();
 
         return {
             success: true,
-            filePath: outputPath,
+            filePath: finalOutputPath,
             format,
             width,
             height,
-            message: `Chart saved to ${outputPath}`
+            message: `Chart saved to ${finalOutputPath}`
         };
     } catch (error) {
         return {

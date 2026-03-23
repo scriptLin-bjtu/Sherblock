@@ -36,10 +36,10 @@ export default {
             height = 600,
         } = params;
 
-        const outputPath = `data/${filename}`;
+        const outputPath = filename;
 
         try {
-            const result = await generateChart(option, outputPath, { width, height });
+            const result = await generateChart(option, outputPath, { width, height, workspacePath: context?.workspacePath });
             return formatChartResult(result, this.name);
         } catch (error) {
             return formatChartError(error, this.name);

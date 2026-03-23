@@ -107,9 +107,77 @@ function estimateTokens(str) {
 function extractChartsFromExecution(executionHistory, scope) {
     const charts = {};
 
-    // 1. 从 scope 中提取直接存储的图表信息（原有逻辑）
-    if (scope?.generated_charts) {
-        Object.assign(charts, scope.generated_charts);
+    // 1. 从 scope 中提取直接存储的图表信息（优先使用 generated_charts 数组）
+    if (Array.isArray(scope?.generated_charts) && scope.generated_charts.length > 0) {
+        scope.generated_charts.forEach((chart, index) => {
+            // 确定图表类型键名
+            let chartKey;
+
+            if (chart.chart_type === 'funnel') {
+                chartKey = 'create-funnel-chart';
+            } else if (chart.chart_type === 'bar') {
+                chartKey = 'create-bar-chart';
+            } else if (chart.chart_type === 'pie') {
+                chartKey = 'create-pie-chart';
+            } else if (chart.chart_type === 'radar') {
+                chartKey = 'create-radar-chart';
+            } else if (chart.chart_type === 'line') {
+                chartKey = 'create-line-chart';
+            } else if (chart.chart_type === 'scatter') {
+                chartKey = 'create-scatter-chart';
+            } else {
+                chartKey = `custom-chart-${index}`;
+            }
+
+            charts[chartKey] = {
+                file: chart.file_path,
+                description: chart.description || chart.title || '数据可视化图表',
+                chartType: chart.chart_type,
+                title: chart.title
+            };
+        });
+    }
+
+    // 1.1 从 scope.visualization_data 中提取图表信息（兼容旧版）
+    if (scope?.visualization_data && typeof scope.visualization_data === 'object') {
+        Object.entries(scope.visualization_data).forEach(([key, chartData]) => {
+            // 检查是否是有效的图表数据
+            if (chartData && chartData.file_path && chartData.chart_type) {
+                // 将 visualization_data 的 key 映射到标准图表键名
+                let chartKey;
+                const chartType = chartData.chart_type;
+
+                // 根据 chart_type 和原始 key 确定标准键名
+                if (chartType === 'funnel' || key.includes('fund')) {
+                    chartKey = 'create-funnel-chart';
+                } else if (chartType === 'radar' || key.includes('network') || key.includes('address')) {
+                    chartKey = 'create-radar-chart';
+                } else if (chartType === 'bar') {
+                    chartKey = 'create-bar-chart';
+                } else if (chartType === 'pie') {
+                    chartKey = 'create-pie-chart';
+                } else if (chartType === 'line') {
+                    chartKey = 'create-line-chart';
+                } else if (chartType === 'scatter') {
+                    chartKey = 'create-scatter-chart';
+                } else if (chartType === 'area') {
+                    chartKey = 'create-area-chart';
+                } else if (chartType === 'heatmap') {
+                    chartKey = 'create-heatmap-chart';
+                } else if (chartType === 'gauge') {
+                    chartKey = 'create-gauge-chart';
+                } else {
+                    chartKey = `custom-chart-${key}`;
+                }
+
+                charts[chartKey] = {
+                    file: chartData.file_path,
+                    description: chartData.description || chartData.title || '数据可视化图表',
+                    chartType: chartType,
+                    title: chartData.title
+                };
+            }
+        });
     }
 
     // 2. 新增：从 scope 中提取生成的图表配置并生成临时图表引用
@@ -536,6 +604,10 @@ ${contextJson}`,
         for (const { key, section, keyword } of chartPriority) {
             const chart = charts[key];
             if (chart && chart.file) {
+                // 提取纯文件名用于图片引用
+                const basename = chart.file.split('/').pop();
+                console.log(`[ReportSkill] Processing chart: ${key}, file: ${chart.file}, basename: ${basename}`);
+
                 const chartRef = `\n\n### ${section}可视化\n\n`;
 
                 // 检查是否有note字段（图表配置存在但图片未生成）
@@ -543,7 +615,8 @@ ${contextJson}`,
                     chartRef += `> **注意**: ${chart.note}\n\n`;
                 }
 
-                chartRef += `![${chart.description}](${chart.file})\n`;
+                // 使用纯文件名作为图片引用（因为报告和图片在同一目录）
+                chartRef += `![${chart.description}](${basename})\n`;
 
                 chartRef += `\n*图表数据来源*: `;
                 if (chart.config) {

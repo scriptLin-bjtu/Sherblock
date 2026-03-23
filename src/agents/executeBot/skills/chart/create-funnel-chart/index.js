@@ -40,7 +40,7 @@ export default {
             backgroundColor = null
         } = params;
 
-        const outputPath = `data/${filename}`;
+        const outputPath = filename;
 
         try {
             const option = {
@@ -95,7 +95,7 @@ export default {
             };
 
             const result = await generateChart(option, outputPath, {
-                width, height, theme, colors, backgroundColor
+                width, height, theme, colors, backgroundColor, workspacePath: context?.workspacePath
             });
             return formatChartResult(result, this.name);
         } catch (error) {

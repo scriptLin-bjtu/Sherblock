@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { workspaceManager } from './workspace-manager.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -19,7 +20,18 @@ export class ScopeManager {
      */
     async initialize() {
         try {
-            await mkdir(join(process.cwd(), this.scopeDir), { recursive: true });
+            // Use workspace path if workspace is initialized, otherwise use default scopeDir
+            let scopeDirPath = this.scopeDir;
+            if (workspaceManager.isInitialized()) {
+                scopeDirPath = workspaceManager.getScopePath();
+            }
+            await mkdir(scopeDirPath, { recursive: true });
+            // Update scopeFile to use the workspace path
+            if (workspaceManager.isInitialized()) {
+                this.scopeFile = join(scopeDirPath, 'scope.json');
+            } else {
+                this.scopeFile = join(process.cwd(), this.scopeDir, 'scope.json');
+            }
         } catch {
             // Directory already exists, ignore
         }

@@ -3,6 +3,7 @@ import { getSystemPrompt } from "./prompt-system.js";
 import { generateUserPrompt, generateInitialObservation } from "./prompt-user.js";
 import { CompressionManager } from "./compression/manager.js";
 import { SkillRegistry, SUPPORTED_CHAINS } from "./skills/index.js";
+import { workspaceManager } from "../../utils/workspace-manager.js";
 
 /**
  * ExecuteAgent - Executes individual steps from the analysis plan
@@ -140,11 +141,13 @@ export class ExecuteAgent {
         try {
             console.log(`[ExecuteAgent] Calling: ${skillName}`);
 
-            // Execute the skill
-            const result = await skill.skill.execute(params, {
+            // Execute the skill with context including workspace path
+            const context = {
                 apiKey: this.getApiKey(),
                 chainId: chainId || this.getChainId(),
-            });
+                workspacePath: workspaceManager.getChartsPath(),
+            };
+            const result = await skill.skill.execute(params, context);
 
             // Add small delay to avoid rate limiting
             await new Promise((r) => setTimeout(r, 300));

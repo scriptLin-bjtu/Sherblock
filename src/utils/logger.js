@@ -6,6 +6,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { workspaceManager } from './workspace-manager.js';
 
 class Logger {
     constructor(options = {}) {
@@ -27,6 +28,10 @@ class Logger {
      */
     async initialize() {
         try {
+            // Use workspace logs directory if workspace is initialized
+            if (workspaceManager.isInitialized()) {
+                this.logsDir = workspaceManager.getLogsPath();
+            }
             // Ensure logs directory exists
             await fs.mkdir(this.logsDir, { recursive: true });
 

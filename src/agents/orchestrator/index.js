@@ -9,6 +9,7 @@ import { QuestionAgent } from '../questionBot/agent.js';
 import { PlanAgent } from '../planBot/agent.js';
 import { ExecuteAgent } from '../executeBot/agent.js';
 import { scopeManager } from '../../utils/scope-manager.js';
+import { workspaceManager } from '../../utils/workspace-manager.js';
 
 export { WorkflowStage } from './state-machine.js';
 
@@ -103,6 +104,9 @@ export class AgentOrchestrator {
      */
     async run(initialInput = null) {
         try {
+            // Initialize workspace first
+            await workspaceManager.initialize();
+
             // Initialize scope manager
             await this.scopeManager.initialize();
 
