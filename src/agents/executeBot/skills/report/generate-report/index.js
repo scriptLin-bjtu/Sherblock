@@ -24,9 +24,18 @@ function reportPrompt(charts = {}) {
 
 报告中已包含以下生成的图表，请在适当的章节中引用：
 
-${Object.entries(charts).map(([type, info]) => `- **${type}**: ${info.description || ''}`).join('\n')}
+${Object.entries(charts).map(([type, info]) => {
+    // 提取文件名（兼容 Windows 和 Unix 路径）
+    const filename = info.file ? info.file.split(/[\/\\]/).pop() : `${type}.png`;
+    return `- **${type}**: ${info.description || ''} (文件名: ${filename})`;
+}).join('\n')}
 
-**图表引用格式**: 使用 Markdown 图片语法 \`![图表描述](文件路径)\`
+**重要**: 请在报告中引用图表时，只使用文件名，不要包含完整路径。例如：
+- 正确: \`![资金流分析](fund-flow-chart.png)\`
+- 正确: \`![行为画像](address-network-chart.png)\`
+- 错误: \`![资金流分析](create-funnel-chart.png)\` (不要使用图表类型键名)
+
+**图表引用格式**: 使用 Markdown 图片语法 \`![图表描述](../charts/文件名.png)\`
 
 **推荐引用位置**:
 - 资金流图 → 放在"详细分析"章节的资金流分析部分
@@ -604,19 +613,19 @@ ${contextJson}`,
         for (const { key, section, keyword } of chartPriority) {
             const chart = charts[key];
             if (chart && chart.file) {
-                // 提取纯文件名用于图片引用
-                const basename = chart.file.split('/').pop();
+                // 提取纯文件名用于图片引用（兼容 Windows 和 Unix 路径）
+                const basename = chart.file.split(/[\/\\]/).pop();
                 console.log(`[ReportSkill] Processing chart: ${key}, file: ${chart.file}, basename: ${basename}`);
 
-                const chartRef = `\n\n### ${section}可视化\n\n`;
+                let chartRef = `\n\n### ${section}可视化\n\n`;
 
                 // 检查是否有note字段（图表配置存在但图片未生成）
                 if (chart.note) {
                     chartRef += `> **注意**: ${chart.note}\n\n`;
                 }
 
-                // 使用纯文件名作为图片引用（因为报告和图片在同一目录）
-                chartRef += `![${chart.description}](${basename})\n`;
+                // 使用相对路径 ../charts/filename.png（从 reports/ 目录访问同级的 charts/ 目录）
+                chartRef += `![${chart.description}](../charts/${basename})\n`;
 
                 chartRef += `\n*图表数据来源*: `;
                 if (chart.config) {

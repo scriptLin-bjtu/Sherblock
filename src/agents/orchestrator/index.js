@@ -485,7 +485,7 @@ ${error.message}
             const actions = entry.result?.history?.filter(h => h.action) || [];
             return actions.some(a => a.action?.type === 'USE_SKILL' &&
                 (a.action.params?.skill_name?.includes('CHART') || a.action.params?.skill?.includes('CHART')));
-        }) || (scope?.generated_charts && Object.keys(scope.generated_charts).length > 0);
+        }) || (scope?.generated_charts && Array.isArray(scope.generated_charts) && scope.generated_charts.length > 0);
 
         if (hasGeneratedCharts) {
             console.log('[Orchestrator] Charts already generated, skipping');
@@ -553,13 +553,15 @@ ${error.message}
             // 保存图表路径到 scope
             if (result.status === 'success' && result.filePath) {
                 if (!this.workflowState.scope.generated_charts) {
-                    this.workflowState.scope.generated_charts = {};
+                    this.workflowState.scope.generated_charts = [];
                 }
-                this.workflowState.scope.generated_charts['create-funnel-chart'] = {
-                    file: result.filePath,
+                this.workflowState.scope.generated_charts.push({
+                    file_path: result.filePath,
+                    chart_type: 'funnel',
+                    title: 'Fund Flow Analysis',
                     description: '资金流分析图表',
                     skillName: 'CREATE_FUNNEL_CHART'
-                };
+                });
                 console.log('[Orchestrator] Fund flow chart generated and saved to:', result.filePath);
             }
         } catch (error) {
@@ -621,13 +623,15 @@ ${error.message}
             // 保存图表路径到 scope
             if (result.status === 'success' && result.filePath) {
                 if (!this.workflowState.scope.generated_charts) {
-                    this.workflowState.scope.generated_charts = {};
+                    this.workflowState.scope.generated_charts = [];
                 }
-                this.workflowState.scope.generated_charts['create-line-chart'] = {
-                    file: result.filePath,
+                this.workflowState.scope.generated_charts.push({
+                    file_path: result.filePath,
+                    chart_type: 'line',
+                    title: 'Transaction History',
                     description: '交易历史趋势图表',
                     skillName: 'CREATE_LINE_CHART'
-                };
+                });
                 console.log('[Orchestrator] Transaction history chart generated and saved to:', result.filePath);
             }
         } catch (error) {
