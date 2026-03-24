@@ -16,7 +16,7 @@ import radarChartSkill from './src/agents/executeBot/skills/chart/create-radar-c
 import reportSkill from './src/agents/executeBot/skills/report/generate-report/index.js';
 
 // 从之前的workspace加载scope数据
-const OLD_SCOPE_PATH = './data/workspace-20260322-233440-f9cea8/scope.json';
+const OLD_SCOPE_PATH = './data/workspace-20260323-150343-8cb97e/scope.json';
 
 /**
  * 模拟执行上下文
