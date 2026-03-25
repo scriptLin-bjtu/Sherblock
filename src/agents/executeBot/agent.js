@@ -3,10 +3,9 @@ import { getSystemPrompt } from "./prompt-system.js";
 import { generateUserPrompt, generateInitialObservation } from "./prompt-user.js";
 import { CompressionManager } from "./compression/manager.js";
 import { SkillRegistry, SUPPORTED_CHAINS } from "./skills/index.js";
-import { workspaceManager } from "../../utils/workspace-manager.js";
 
 /**
- * ExecuteAgent - Executes individual steps from the analysis plan
+ * ExecuteAgent - Executes individual steps from analysis plan
  * Uses ReAct (Reasoning + Acting) pattern
  */
 export class ExecuteAgent {
@@ -54,7 +53,7 @@ export class ExecuteAgent {
     }
 
     /**
-     * Get the Etherscan API key from environment
+     * Get Etherscan API key from environment
      */
     getApiKey() {
         const apiKey = process.env.ETHERSCAN_API_KEY;
@@ -141,18 +140,17 @@ export class ExecuteAgent {
         try {
             console.log(`[ExecuteAgent] Calling: ${skillName}`);
 
-            // Execute the skill with context including workspace path
+            // Execute skill with context
             const context = {
                 apiKey: this.getApiKey(),
                 chainId: chainId || this.getChainId(),
-                workspacePath: workspaceManager.getChartsPath(),
             };
             const result = await skill.skill.execute(params, context);
 
             // Add small delay to avoid rate limiting
             await new Promise((r) => setTimeout(r, 300));
 
-            // Ensure result has the expected format
+            // Ensure result has expected format
             if (result && result.type === "OBSERVATION" && result.content) {
                 return result;
             } else if (result && result.content) {
@@ -196,7 +194,7 @@ export class ExecuteAgent {
 
         console.log(`\n[ExecuteAgent] Starting step: ${currentStep.goal}`);
 
-        // Start the ReAct loop with initial observation
+        // Start of ReAct loop with initial observation
         const initialObservation = generateInitialObservation(currentStep);
 
         return await this.react(initialObservation);
@@ -277,7 +275,7 @@ export class ExecuteAgent {
                     console.log(`[ExecuteAgent] Compression stats: ${stats.savedPercent}% saved (${stats.totalSavedTokens} tokens)`);
                 }
             } catch (error) {
-                // 详细错误定位信息
+                // Detailed error tracking information
                 console.error("[ERROR] ExecuteAgent.react: Compression failed", {
                     error: error.message,
                     stack: error.stack,
@@ -355,12 +353,12 @@ export class ExecuteAgent {
             content: action,
         });
 
-        // Execute the action
+        // Execute action
         return await this.executeAction(action);
     }
 
     /**
-     * Execute the action returned by LLM
+     * Execute action returned by LLM
      */
     async executeAction(action) {
         switch (action.action_type) {
@@ -401,7 +399,7 @@ export class ExecuteAgent {
                             `\n...[truncated, total ${resultStr.length} chars]`;
                     }
                 } catch (error) {
-                    // 详细错误定位信息
+                    // Detailed error tracking information
                     console.error("[ERROR] ExecuteAgent: Failed to format skill result", {
                         skillName,
                         contentType: typeof result.content,

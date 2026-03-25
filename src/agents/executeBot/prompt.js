@@ -15,7 +15,7 @@ function getSkillsDocumentation() {
 }
 
 /**
- * Generate the system prompt for ExecuteAgent
+ * Generate system prompt for ExecuteAgent
  * @param {Object} scope - The analysis scope object
  * @param {Object} currentStep - The current step to execute
  * @param {Array} executionHistory - History of actions and observations
@@ -91,7 +91,7 @@ export function prompt(scope, currentStep, executionHistory = []) {
         .join("\n");
 
     return `
-You are the **Execution Module** in a "Blockchain Transaction Behavior Analysis Agent".
+You are a **Execution Module** in a "Blockchain Transaction Behavior Analysis Agent".
 You operate using the **ReAct (Reasoning → Action → Observation)** paradigm.
 
 # Core Responsibility
@@ -118,7 +118,7 @@ ${skillsDoc}
 # Available Actions
 
 ## 1. USE_SKILL — Execute a blockchain analysis skill
-Use this to query blockchain data via Etherscan API.
+Use this to query blockchain data via the Etherscan API.
 
 \`\`\`json
 {
@@ -135,7 +135,7 @@ Use this to query blockchain data via Etherscan API.
 **Required fields:**
 - thought: Your reasoning for this action
 - action_type: "USE_SKILL"
-- skill_name: Name of the skill from the available skills
+- skill_name: Name of skill from available skills
 - params: Object with required parameters for the skill
 - chain_id: (optional) Chain ID to query, defaults to scope's chain
 
@@ -145,7 +145,7 @@ Use EXACT parameter names as documented for each skill:
 - Pagination: "offset" for number of items per page (NOT "limit")
 - Always check skill documentation for correct parameter names
 
-## 2. UPDATE_SCOPE — Update the analysis scope with findings
+## 2. UPDATE_SCOPE — Update analysis scope with findings
 Use this to record important discoveries that should persist.
 
 \`\`\`json
@@ -167,7 +167,7 @@ Use this when you have accomplished the step's goal and met success criteria.
 
 \`\`\`json
 {
-  "thought": "I have successfully traced the fund sources and identified the key patterns",
+  "thought": "I have successfully traced fund sources and identified key patterns",
   "action_type": "FINISH",
   "result": {
     "status": "success",
@@ -219,7 +219,7 @@ Always refer to the step's \`success_criteria\` field to determine when to FINIS
 ## Constraints
 - Respect the step's \`constraints\` field
 - Use pagination for large result sets (default: 100 items per page)
-- Target the correct chain based on scope
+- Target the correct chain based on the scope
 
 # Important Rules
 1. **Output only one action at a time**
@@ -228,39 +228,6 @@ Always refer to the step's \`success_criteria\` field to determine when to FINIS
 4. **Track progress** - avoid repeating the same queries
 5. **Be efficient** - combine information from multiple results before deciding
 6. **Respect constraints** - follow any limitations specified in the step
-
-# Chart Generation Requirements
-
-**IMPORTANT**: When the step goal involves creating charts or visualizations, you MUST use \`USE_SKILL\` to call the appropriate chart generation skills. Do NOT use \`UPDATE_SCOPE\` to just save chart configuration.
-
-## Chart Generation Skills Available:
-- \`CREATE_LINE_CHART\` - Line charts for trends over time
-- \`CREATE_BAR_CHART\` - Bar charts for comparisons
-- \`CREATE_PIE_CHART\` - Pie charts for proportions
-- \`CREATE_RADAR_CHART\` - Radar charts for multi-dimensional analysis
-- \`CREATE_FUNNEL_CHART\` - Funnel charts for flow analysis
-- \`CREATE_SCATTER_CHART\` - Scatter plots for correlations
-- \`CREATE_AREA_CHART\` - Area charts for cumulative trends
-- \`CREATE_GAUGE_CHART\` - Gauge charts for metrics
-- \`CREATE_HEATMAP_CHART\` - Heatmaps for density analysis
-
-## Correct Chart Generation Example:
-
-\`\`\`json
-{
-  "thought": "The user wants to visualize the fund flow patterns. I will create a funnel chart showing the distribution of transactions.",
-  "action_type": "USE_SKILL",
-  "skill_name": "CREATE_FUNNEL_CHART",
-  "params": {
-    "title": "Fund Flow Analysis",
-    "data": [
-      { "name": "Incoming Transactions", "value": 120 },
-      { "name": "Outgoing Transactions", "value": 95 },
-      { "name": "Unique Recipients", "value": 45 }
-    ]
-  }
-}
-\`\`\`
 `;
 }
 

@@ -144,10 +144,7 @@ export class AgentOrchestrator {
             // Phase 3: Execute with review
             const result = await this._executeWithReview();
 
-            // Phase 4: Generate report
-            const report = await this._generateReport();
-
-            // Complete workflow - 只在合适的状态下转换到 COMPLETED
+            // Complete workflow - only transition in appropriate states
             const currentState = this.stateMachine.getState();
             if (currentState === WorkflowStage.EXECUTING || currentState === WorkflowStage.REVIEWING) {
                 await this.stateMachine.transition(WorkflowStage.COMPLETED, {
@@ -156,8 +153,8 @@ export class AgentOrchestrator {
                     currentStepIndex: this.workflowState.currentStepIndex
                 });
             } else if (currentState === WorkflowStage.PLANNING) {
-                // 如果在 PLANNING 状态（由于审查修改了计划），直接转换到 COMPLETED
-                // 此时所有步骤已完成，只是状态在 PLANNING
+                // If in PLANNING state (due to review modifying plan), transition directly to COMPLETED
+                // All steps are completed, just the state is in PLANNING
                 await this.stateMachine.transition(WorkflowStage.COMPLETED, {
                     plan: this.workflowState.plan,
                     scope: this.workflowState.scope,
@@ -165,9 +162,9 @@ export class AgentOrchestrator {
                 });
             }
 
-            this._emit('workflow:completed', { result, report });
+            this._emit('workflow:completed', { result });
 
-            return { result, report };
+            return { result };
 
         } catch (error) {
             this._emit('workflow:error', { error: error.message, stack: error.stack });
@@ -181,6 +178,8 @@ export class AgentOrchestrator {
      */
     async _collectRequirements(initialInput) {
         this._emit('collection:started', { initialInput });
+
+ });
 
         try {
             // Get or create readline interface for user input
@@ -203,7 +202,7 @@ export class AgentOrchestrator {
                 });
             };
 
-            // Use the QuestionAgent's collectRequirements method
+            // Use QuestionAgent's collectRequirements method
             const infos = await this.questionAgent.collectRequirements(initialInput, {
                 onQuestion: async (question) => {
                     this._emit('question:asked', { question });
@@ -344,7 +343,7 @@ export class AgentOrchestrator {
 
             if (!shouldContinue) {
                 // Even when terminating, increment step index to mark this step as completed
-                // This ensures the transition to COMPLETED state passes the guard check
+                // This ensures transition to COMPLETED state passes guard check
                 this.workflowState.currentStepIndex++;
                 break;
             }
@@ -405,241 +404,6 @@ export class AgentOrchestrator {
     }
 
     /**
-     * Generate analysis report from workflow context using the report skill
-     * @private
-     */
-    async _generateReport() {
-        this._emit('report:generation:started', {});
-
-        try {
-            // 检查是否需要生成图表
-            await this._checkAndGenerateCharts();
-
-            // 准备技能参数
-            const params = {
-                scope: this.workflowState.scope,
-                plan: this.workflowState.plan,
-                executionHistory: this.workflowState.executionHistory,
-                reviewResults: this.workflowState.reviewResults
-            };
-
-            // 直接导入报告生成技能模块并调用
-            const reportSkillPath = new URL('../executeBot/skills/report/generate-report/index.js', import.meta.url).href;
-            const reportSkill = await import(reportSkillPath);
-
-            const context = {
-                apiKey: process.env.ETHERSCAN_API_KEY,
-                chainId: this.workflowState.scope?.chain || '1' // 默认 Ethereum
-            };
-
-            const report = await reportSkill.default.execute(params, context);
-
-            this._emit('report:generation:completed', { report });
-            return report;
-        } catch (error) {
-            this._emit('report:generation:error', { error: error.message, stack: error.stack });
-            console.error('[Orchestrator] Report generation failed:', error);
-
-            // 生成简单的错误报告
-            const timestamp = new Date().toISOString();
-            return `# 区块链分析报告
-
-**生成时间**: ${timestamp}
-
----
-
-## 摘要
-
-报告生成失败。以下为简化的分析摘要。
-
----
-
-## 分析目标
-
-${this.workflowState.scope?.goal || "分析目标未明确指定"}
-
----
-
-## 错误信息
-
-${error.message}
-
----
-
-请联系系统管理员或重试分析。
-
-`;
-        }
-    }
-
-    /**
-     * Check if visualization data exists and generate charts if needed
-     * @private
-     */
-    async _checkAndGenerateCharts() {
-        const scope = this.workflowState.scope;
-        const executionHistory = this.workflowState.executionHistory;
-
-        // 检查是否已经生成过图表 (通过 USE_SKILL 调用或 scope 中的图表文件路径)
-        const hasGeneratedCharts = executionHistory?.some(entry => {
-            const actions = entry.result?.history?.filter(h => h.action) || [];
-            return actions.some(a => a.action?.type === 'USE_SKILL' &&
-                (a.action.params?.skill_name?.includes('CHART') || a.action.params?.skill?.includes('CHART')));
-        }) || (scope?.generated_charts && Array.isArray(scope.generated_charts) && scope.generated_charts.length > 0);
-
-        if (hasGeneratedCharts) {
-            console.log('[Orchestrator] Charts already generated, skipping');
-            return;
-        }
-
-        // 检查是否有可视化数据
-        const hasVisualizationData =
-            (scope?.normal_transactions && scope.normal_transactions.length > 0) ||
-            (scope?.transactions && scope.transactions.length > 0) ||
-            (scope?.visualization_data);
-
-        if (!hasVisualizationData) {
-            console.log('[Orchestrator] No visualization data found, skipping chart generation');
-            return;
-        }
-
-        console.log('[Orchestrator] Visualization data found, generating charts...');
-
-        try {
-            // 生成图表
-            await this._generateFundFlowChart(scope);
-            await this._generateTransactionHistoryChart(scope);
-
-        } catch (error) {
-            console.warn('[Orchestrator] Chart generation failed:', error.message);
-            // 不中断流程，继续生成报告
-        }
-    }
-
-    /**
-     * Generate fund flow chart
-     * @private
-     */
-    async _generateFundFlowChart(scope) {
-        const transactions = scope.normal_transactions || scope.transactions || [];
-        if (transactions.length === 0) {
-            return;
-        }
-
-        try {
-            const funnelSkillPath = new URL('../executeBot/skills/chart/create-funnel-chart/index.js', import.meta.url).href;
-            const funnelSkill = await import(funnelSkillPath);
-
-            // 准备漏斗数据
-            const uniqueSenders = new Set(transactions.map(tx => tx.from || tx.sender)).size;
-            const uniqueRecipients = new Set(transactions.map(tx => tx.to || tx.recipient)).size;
-            const tokenTransfers = scope.token_transfers?.length || 0;
-
-            const data = [
-                { name: 'Unique Senders', value: uniqueSenders },
-                { name: 'Unique Recipients', value: uniqueRecipients },
-                { name: 'Total Transactions', value: transactions.length }
-            ];
-
-            if (tokenTransfers > 0) {
-                data.push({ name: 'Token Transfers', value: tokenTransfers });
-            }
-
-            const result = await funnelSkill.default.execute({
-                title: 'Fund Flow Analysis',
-                data: data,
-            }, {});
-
-            // 保存图表路径到 scope
-            if (result.status === 'success' && result.filePath) {
-                if (!this.workflowState.scope.generated_charts) {
-                    this.workflowState.scope.generated_charts = [];
-                }
-                this.workflowState.scope.generated_charts.push({
-                    file_path: result.filePath,
-                    chart_type: 'funnel',
-                    title: 'Fund Flow Analysis',
-                    description: '资金流分析图表',
-                    skillName: 'CREATE_FUNNEL_CHART'
-                });
-                console.log('[Orchestrator] Fund flow chart generated and saved to:', result.filePath);
-            }
-        } catch (error) {
-            console.error('[Orchestrator] Failed to generate fund flow chart:', error.message);
-        }
-    }
-
-    /**
-     * Generate transaction history chart
-     * @private
-     */
-    async _generateTransactionHistoryChart(scope) {
-        const transactions = scope.normal_transactions || scope.transactions || [];
-        if (transactions.length === 0) {
-            return;
-        }
-
-        try {
-            const lineSkillPath = new URL('../executeBot/skills/chart/create-line-chart/index.js', import.meta.url).href;
-            const lineSkill = await import(lineSkillPath);
-
-            // 按时间排序并分组
-            const sortedTx = [...transactions].sort((a, b) => {
-                const timeA = a.timestamp || a.time || 0;
-                const timeB = b.timestamp || b.time || 0;
-                return timeA - timeB;
-            });
-
-            const dailyVolume = {};
-            const dailyCount = {};
-
-            for (const tx of sortedTx) {
-                const timestamp = tx.timestamp || tx.time || 0;
-                const date = new Date(timestamp * 1000);
-                const dateKey = date.toISOString().split('T')[0];
-
-                const value = tx.value ? parseFloat(tx.value) / 1e18 : 0;
-                dailyVolume[dateKey] = (dailyVolume[dateKey] || 0) + value;
-                dailyCount[dateKey] = (dailyCount[dateKey] || 0) + 1;
-            }
-
-            const dates = Object.keys(dailyVolume).sort();
-            if (dates.length === 0) {
-                return;
-            }
-
-            const volumeData = dates.map(d => dailyVolume[d]);
-            const countData = dates.map(d => dailyCount[d]);
-
-            const result = await lineSkill.default.execute({
-                title: 'Transaction History',
-                xAxis: dates,
-                series: [
-                    { name: 'Transaction Volume (ETH)', data: volumeData },
-                    { name: 'Transaction Count', data: countData }
-                ],
-            }, {});
-
-            // 保存图表路径到 scope
-            if (result.status === 'success' && result.filePath) {
-                if (!this.workflowState.scope.generated_charts) {
-                    this.workflowState.scope.generated_charts = [];
-                }
-                this.workflowState.scope.generated_charts.push({
-                    file_path: result.filePath,
-                    chart_type: 'line',
-                    title: 'Transaction History',
-                    description: '交易历史趋势图表',
-                    skillName: 'CREATE_LINE_CHART'
-                });
-                console.log('[Orchestrator] Transaction history chart generated and saved to:', result.filePath);
-            }
-        } catch (error) {
-            console.error('[Orchestrator] Failed to generate transaction history chart:', error.message);
-        }
-    }
-
-    /**
      * Handle review decision and apply adjustments
      * @private
      */
@@ -669,7 +433,7 @@ ${error.message}
                 return true;
 
             case 'ADD_STEPS':
-                // Add new steps to the plan
+                // Add new steps to plan
                 if (adjustments && adjustments.length > 0) {
                     this.workflowState.plan = this.planAgent.adjustPlan(
                         this.workflowState.plan,
@@ -679,7 +443,7 @@ ${error.message}
                 return true;
 
             case 'REMOVE_STEPS':
-                // Remove steps from the plan
+                // Remove steps from plan
                 if (adjustments && adjustments.length > 0) {
                     this.workflowState.plan = this.planAgent.adjustPlan(
                         this.workflowState.plan,
@@ -696,14 +460,14 @@ ${error.message}
                         this.workflowState.plan = this.planAgent.reorderRemainingSteps(
                             this.workflowState.plan,
                             reorderAdjustment.newOrder,
-                            this.workflowState.currentStepIndex  // 传递当前步骤索引
+                            this.workflowState.currentStepIndex  // pass current step index
                         );
                     }
                 }
                 return true;
 
             case 'TERMINATE':
-                // Terminate the workflow
+                // Terminate workflow
                 return false;
 
             default:
@@ -760,7 +524,7 @@ ${error.message}
     }
 
     /**
-     * Pause the workflow
+     * Pause workflow
      */
     pause() {
         this._paused = true;
@@ -768,7 +532,7 @@ ${error.message}
     }
 
     /**
-     * Resume the workflow
+     * Resume workflow
      */
     resume() {
         this._paused = false;
@@ -781,7 +545,7 @@ ${error.message}
     }
 
     /**
-     * Stop the workflow
+     * Stop workflow
      */
     stop() {
         this._stopped = true;
