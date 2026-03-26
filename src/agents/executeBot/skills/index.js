@@ -31,6 +31,7 @@ export class SkillLoader {
             "gas",
             "block",
             "nametag",
+            "report",
         ];
 
         for (const category of categories) {
@@ -40,9 +41,12 @@ export class SkillLoader {
                     withFileTypes: true,
                 });
                 for (const entry of entries) {
-                    if (entry.isDirectory() &&
+                    if (
+                        entry.isDirectory() &&
                         !entry.name.startsWith("_") &&
-                        entry.name !== "templates") {  // 过滤 templates 目录
+                        entry.name !== "templates"
+                    ) {
+                        // 过滤 templates 目录
                         skills.push({
                             id: `${category}/${entry.name}`,
                             path: join(categoryPath, entry.name),
@@ -144,14 +148,14 @@ export class SkillRegistry {
             } catch (error) {
                 console.error(
                     `[SkillRegistry] Failed to load skill at ${path}:`,
-                    error.message
+                    error.message,
                 );
             }
         }
 
         this.initialized = true;
         console.log(
-            `[SkillRegistry] Initialized with ${this.skills.size} skills`
+            `[SkillRegistry] Initialized with ${this.skills.size} skills`,
         );
     }
 
@@ -168,7 +172,7 @@ export class SkillRegistry {
         const aliasedName = SKILL_ALIASES[name];
         if (aliasedName && this.skills.has(aliasedName)) {
             console.log(
-                `[SkillRegistry] Resolved alias "${name}" to "${aliasedName}"`
+                `[SkillRegistry] Resolved alias "${name}" to "${aliasedName}"`,
             );
             return aliasedName;
         }
@@ -194,7 +198,7 @@ export class SkillRegistry {
                 name,
                 description,
                 category,
-            })
+            }),
         );
     }
 
@@ -294,9 +298,12 @@ export class SkillRegistry {
         summary += "The following data can be queried during execution:\n\n";
 
         const categoryDescriptions = {
-            account: "## Account Analysis\n- Query native ETH balance for any address\n- Get transaction history (normal and internal transactions)\n- Identify funding sources and related addresses\n- Get transaction count (nonce) for an address",
-            contract: "## Contract Analysis\n- Retrieve contract ABI and source code\n- Identify contract creator address\n- Read contract code and storage",
-            transaction: "## Transaction Analysis\n- Get transaction details and receipt\n- Query transaction status and internal transactions triggered by a transaction",
+            account:
+                "## Account Analysis\n- Query native ETH balance for any address\n- Get transaction history (normal and internal transactions)\n- Identify funding sources and related addresses\n- Get transaction count (nonce) for an address",
+            contract:
+                "## Contract Analysis\n- Retrieve contract ABI and source code\n- Identify contract creator address\n- Read contract code and storage",
+            transaction:
+                "## Transaction Analysis\n- Get transaction details and receipt\n- Query transaction status and internal transactions triggered by a transaction\n- Decode contract call data (method name and parameters) using ABI",
             token: "## Token Analysis\n- Query token information (name, symbol, total supply)\n- Get ERC20/ERC721/ERC1155 transfer events\n- Query token balances for specific addresses\n- Get top token holders for a contract",
             proxy: "## Blockchain RPC\n- Get current block number\n- Get block information by number or timestamp\n- Get transaction details and receipt by hash\n- Read contract code via eth_call\n- Query gas price",
             logs: "## Event Logs\n- Query event logs by address, topics, and block range",
@@ -304,11 +311,16 @@ export class SkillRegistry {
             gas: "## Gas Analysis\n- Query estimated gas prices and gas costs",
             block: "## Block Analysis\n- Get block information by timestamp",
             nametag: "## Address Metadata\n- Get address tags and labels",
+            report: "## Report Generation\n- Generate structured markdown analysis reports saved to the report/ directory\n- Summarize all findings and scope data into a formatted document",
             basic: "## Basic Operations\n- Query basic blockchain data",
         };
 
-        for (const [category, description] of Object.entries(categoryDescriptions)) {
-            const hasSkills = Array.from(this.skills.values()).some(s => s.category === category);
+        for (const [category, description] of Object.entries(
+            categoryDescriptions,
+        )) {
+            const hasSkills = Array.from(this.skills.values()).some(
+                (s) => s.category === category,
+            );
             if (hasSkills) {
                 summary += description + "\n\n";
             }

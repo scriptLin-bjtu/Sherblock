@@ -53,23 +53,23 @@ Modular skill system with 30+ skills organized by category. Each skill is a sepa
 - **Account**: Balance, transactions, internal transactions, token transfers, get-funded-by
 - **Contract**: ABI, source code, creator
 - **Transaction**: Receipt status, internal tx by hash
-- **Token**: ERC20/ERC721/ERC1155 transfers, token supply
+- **Token**: ERC20/ERC721/ERC1155 transfers, token supply, token info, token balance
 - **Block**: Block details by number/hash
 - **Gas**: Gas price, gas used statistics
 - **Logs**: Event logs
-- **Stats**: ETH price, supply
+- **Stats**: ETH price, supply, block reward
 - **Nametag**: Address name tags and labels
+- **Proxy**: Direct RPC calls (eth_getBlockByNumber, eth_call, etc.)
 
 **Visualization & Reporting Skills:**
-- **Chart**: Create line, bar, pie, scatter, radar, area, heatmap, gauge, funnel charts (using ECharts)
 - **Report**: Generate structured markdown analysis reports from workflow context
 
 **Skill Registry** (`src/agents/executeBot/skills/index.js`): Dynamically loads skills from filesystem with:
 - `SkillLoader`: Discovers and caches skills (caching improves performance)
 - `SkillRegistry`: Manages loaded skills, validates parameters, resolves aliases
-- **Skill Aliases**: Handles common LLM naming variations (e.g., `GET_NORMAL_TRANSACTIONS` → `GET_TRANSACTIONS`)
+- `Skill Aliases`: Handles common LLM naming variations (e.g., `GET_NORMAL_TRANSACTIONS` → `GET_TRANSACTIONS`)
 
-Each skill exports an object with:
+Each skill exports `default` object with:
 - `name`, `description`, `category`, `params` (required/optional)
 - `whenToUse` (array of scenarios)
 - `execute(params, context)` async function
@@ -81,11 +81,6 @@ Each skill exports an object with:
   - `normalizeParams()` - Parameter name normalization for LLM mistakes
   - `compressResponse()` - Response compression for context management
   - `summarizeTransactions()` - Transaction list summarization
-- `echarts-client.js` - Chart generation with:
-  - `generateChart()` - Main chart generation function
-  - `generateSVGChart()` - SVG format support
-  - Theme system (light/dark)
-  - Format support: PNG, JPEG, WebP, SVG
 - `config.js` - Configuration constants including supported chains
 - `proxy-agent.js` - Proxy configuration for HTTP requests
 
@@ -106,14 +101,30 @@ Each skill exports an object with:
 - Sepolia (testnet): `11155111`
 - Polygon Amoy (testnet): `80002`
 
+### Workspace Management (`src/utils/workspace-manager.js`)
+
+Each task execution creates a unique workspace directory to isolate task files:
+- Workspace ID format: `workspace-YYYYMMDD-HHmmss-{random}`
+- Workspace structure:
+  - `data/{workspaceId}/` - Root workspace directory
+  - `data/{workspaceId}/logs/` - Execution logs
+  - `data/{workspaceId}/charts/` - Generated charts
+  - `data/{workspaceId}/reports/` - Generated reports
+  - `data/{workspaceId}/scope.json` - Persisted scope for debugging
+
+### Context Compression (`src/agents/executeBot/compression/`)
+
+CompressionManager coordinates all compression operations:
+- **HistoryCompressor**: Compresses execution history to reduce token usage
+- **ScopeFilter**: Filters scope data to only relevant fields for current step
+- Token estimation for prompt size management
+
 ## Dependencies
 
 Key dependencies:
-- `canvas` - Canvas backend for chart generation (Node.js canvas implementation)
-- `echarts` - Charting library for data visualization
-- `ech` - ECharts compatibility layer for Node.js
 - `undici` - HTTP/1.1 client for making requests (includes ProxyAgent support)
 - `dotenv` - Environment variable management
+- `ethers` - Ethereum utilities (devDependency, currently v5.8.0 installed)
 
 ## Development Commands
 
@@ -149,7 +160,8 @@ src/
 ├── index.js                    # Main entry point, agent initialization
 ├── test.js                     # Etherscan API test script
 ├── utils/
-│   └── scope-manager.js       # Scope persistence to JSON file
+│   ├── workspace-manager.js     # Workspace directory management
+│   └── scope-manager.js        # Scope persistence to JSON file
 ├── services/
 │   └── agent.js               # LLM service with multi-provider support
 └── agents/
@@ -161,19 +173,21 @@ src/
     │   └── prompt.js          # Prompt for plan generation with scope/steps
     ├── executeBot/
     │   ├── agent.js           # ExecuteAgent - step execution with ReAct
-    │   ├── prompt.js          # ReAct prompt with USE_SKILL/UPDATE_SCOPE/FINISH
+    │   ├── prompt-system.js    # System prompt for ExecuteAgent
+    │   ├── compression/       # Context compression system
+    │   │   ├── config.js
+    │   │   ├── manager.js
+    │   │   ├── history-compressor.js
+    │   │   └── scope-filter.js
     │   └── skills/            # Modular skill system
     │       ├── index.js       # Skill registry and loader
+    │       ├── lib/           # Shared libraries
     │       └── [category]/[skill]/index.js
     └── orchestrator/
         ├── index.js           # AgentOrchestrator - central coordinator
         ├── events.js          # EventBus implementation
         └── state-machine.js   # Workflow state management with guards
 ```
-
-**data/ directory** (created at runtime):
-- `scope.json` - Current workflow scope persisted to file for debugging
-- Charts generated by visualization skills are saved here
 
 ## Important Implementation Details
 
@@ -186,7 +200,8 @@ src/
    - PlanAgent generates a plan with `scope` (shared state) and `steps`
    - ExecuteAgent updates `scope` during execution via `UPDATE_SCOPE` actions
    - WorkflowStateMachine enforces state transitions with guards
-   - **ScopeManager** (`src/utils/scope-manager.js`): Persists scope to JSON file (`data/scope.json`) for debugging and recovery
+   - **ScopeManager** (`src/utils/scope-manager.js`): Persists scope to workspace `scope.json` for debugging and recovery
+   - **WorkspaceManager** (`src/utils/workspace-manager.js`): Creates isolated workspace directories for each task
 
 4. **Skill System**: Skills are modular and loaded dynamically. Each skill is a self-contained module that:
    - Defines its interface (name, params, when to use)
@@ -194,24 +209,18 @@ src/
    - Calls Etherscan API with proxy and rate limiting
    - Compresses large responses to prevent context overflow
 
-5. **Chart Generation**: Chart skills use ECharts library with canvas backend:
-   - Supported formats: PNG, JPEG, WebP, SVG
-   - Theme system: light and dark themes
-   - Chart types: line, bar, pie, scatter, radar, area, heatmap, gauge, funnel, custom
-   - Charts are saved to `data/` directory
+5. **Report Generation**: `GENERATE_MARKDOWN_REPORT` skill:
+   - Generates structured markdown reports from workflow context
+   - Saves to workspace's `reports/` directory
+   - Report sections: Summary, Goals, Key Findings, Detailed Data
+   - Filename format: `report-YYYYMMDD-HHmmss.md` or custom filename
 
-6. **Report Generation**: `GENERATE_ANALYSIS_REPORT` skill:
-   - Uses DeepSeek Reasoner to generate structured markdown reports
-   - Compresses workflow context to avoid token limits
-   - Includes fallback report generation when LLM fails
-   - Report sections: Summary, Goals, Execution Plan, Key Findings, Detailed Analysis, Conclusions
-
-7. **LLM Provider Differences**: The `callLLM` function handles provider-specific formats:
+6. **LLM Provider Differences**: The `callLLM` function handles provider-specific formats:
    - GLM supports `thinking` mode
    - DeepSeek Reasoner has limited params (no temperature), returns `reasoning_content` separately
    - All providers use same base message format but different endpoint URLs
 
-8. **Event-Driven Architecture**: AgentOrchestrator uses EventBus for communication. Events include:
+7. **Event-Driven Architecture**: AgentOrchestrator uses EventBus for communication. Events include:
    - `workflow:started`, `workflow:completed`, `workflow:error`
    - `stage:changed`
    - `step:started`, `step:completed`

@@ -1,7 +1,8 @@
 /**
  * Get Contract ABI Skill
  *
- * Gets the ABI (Application Binary Interface) for a verified contract.
+ * Gets the ABI (Application Binary Interface) for a verified contract address.
+ * Use this when you have a contract address and want to explore what functions are available.
  * If the contract is a proxy, automatically returns the implementation ABI.
  */
 
@@ -15,7 +16,7 @@ import {
 export default {
     name: "GET_CONTRACT_ABI",
 
-    description: "Get the ABI for a verified contract. Automatically returns implementation ABI if contract is a proxy.",
+    description: "Get the complete ABI for a verified contract address. Use this when you have a contract address and want to explore available functions or contract capabilities. Automatically returns implementation ABI if contract is a proxy.",
 
     category: "contract",
 
@@ -25,10 +26,11 @@ export default {
     },
 
     whenToUse: [
-        "Need to interact with a contract",
-        "Decoding contract calls",
-        "Analyzing contract functions",
-        "Getting ABI for proxy contracts",
+        "User provided a contract address and wants to know what functions are available",
+        "Need to explore or analyze a contract's interface",
+        "Want to understand what a contract can do",
+        "Have only contract address (not transaction hash) and need to interact with contract",
+        "CAUTION: Do NOT use when user provides a transaction hash - use GET_TRANSACTION_CALL_INFO instead",
     ],
 
     async execute(params, context) {

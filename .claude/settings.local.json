@@ -19,7 +19,10 @@
       "Bash(ls:*)",
       "Bash(npm run:*)",
       "Bash(npm test:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(npm list:*)",
+      "Bash(node -e \":*)",
+      "Bash(npm uninstall:*)"
     ]
   }
 }

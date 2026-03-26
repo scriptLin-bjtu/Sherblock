@@ -13,9 +13,7 @@
     "type": "module",
     "dependencies": {
         "dotenv": "^17.2.3",
+        "ethers": "^5.8.0",
         "undici": "^7.22.0"
-    },
-    "devDependencies": {
-        "ethers": "^6.16.0"
     }
 }

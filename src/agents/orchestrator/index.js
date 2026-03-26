@@ -179,8 +179,6 @@ export class AgentOrchestrator {
     async _collectRequirements(initialInput) {
         this._emit('collection:started', { initialInput });
 
- });
-
         try {
             // Get or create readline interface for user input
             let rl = this._options.readline;
