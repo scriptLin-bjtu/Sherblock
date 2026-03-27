@@ -5,7 +5,7 @@
  * scope and saves it to the project root's `report/` directory.
  */
 
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile, mkdir, readdir } from "fs/promises";
 import { join } from "path";
 import { workspaceManager } from "../../../../../utils/workspace-manager.js";
 import { scopeManager } from "../../../../../utils/scope-manager.js";
@@ -56,9 +56,47 @@ function renderObject(obj, indent = "") {
 }
 
 /**
+ * Get all SVG files from the charts directory.
+ * Returns an array of SVG filenames, or empty array if directory doesn't exist or has no SVG files.
+ */
+async function getChartFiles() {
+    try {
+        if (!workspaceManager.isInitialized()) {
+            return [];
+        }
+        const chartsPath = workspaceManager.getChartsPath();
+        const files = await readdir(chartsPath);
+        return files.filter((file) => file.toLowerCase().endsWith(".svg"));
+    } catch (error) {
+        // charts directory doesn't exist or can't be read
+        return [];
+    }
+}
+
+/**
+ * Build the charts section markdown content from SVG file list.
+ * Uses relative path ../charts/ to access charts from reports directory.
+ */
+function buildChartsSection(chartFiles) {
+    if (!chartFiles || chartFiles.length === 0) {
+        return "";
+    }
+
+    let section = "## 可视化图表\n\n";
+
+    for (const file of chartFiles) {
+        // Extract title from filename (remove .svg extension)
+        const title = file.replace(/\.svg$/i, "");
+        section += `![${title}](../charts/${file})\n\n`;
+    }
+
+    return section;
+}
+
+/**
  * Build the complete markdown report content from scope + optional extra sections.
  */
-function buildMarkdownReport(title, scope, extraSections = []) {
+function buildMarkdownReport(title, scope, extraSections = [], chartFiles = []) {
     const now = new Date();
     const lines = [];
 
@@ -82,10 +120,15 @@ function buildMarkdownReport(title, scope, extraSections = []) {
     lines.push("2. [分析目标](#分析目标)");
     lines.push("3. [关键发现](#关键发现)");
     lines.push("4. [详细数据](#详细数据)");
+    // Add charts section to TOC if charts exist
+    if (chartFiles.length > 0) {
+        lines.push("5. [可视化图表](#可视化图表)");
+    }
     if (extraSections.length > 0) {
+        const baseIndex = 5 + (chartFiles.length > 0 ? 1 : 0);
         extraSections.forEach((s, i) => {
             lines.push(
-                `${5 + i}. [${s.heading}](#${s.heading.replace(/\s+/g, "-")})`,
+                `${baseIndex + i}. [${s.heading}](#${s.heading.replace(/\s+/g, "-")})`,
             );
         });
     }
@@ -179,6 +222,12 @@ function buildMarkdownReport(title, scope, extraSections = []) {
         });
     }
 
+    // Charts section (if SVG files exist)
+    if (chartFiles.length > 0) {
+        const chartsSection = buildChartsSection(chartFiles);
+        lines.push(chartsSection);
+    }
+
     // Extra custom sections
     extraSections.forEach((section) => {
         lines.push(`## ${section.heading}`);
@@ -256,11 +305,15 @@ export default {
             // Build extra sections
             const extraSections = Array.isArray(sections) ? sections : [];
 
+            // Get SVG chart files from charts directory
+            const chartFiles = await getChartFiles();
+
             // Build and write markdown
             const markdownContent = buildMarkdownReport(
                 title,
                 scope,
                 extraSections,
+                chartFiles,
             );
             await writeFile(outputPath, markdownContent, "utf-8");
 

@@ -32,6 +32,7 @@ export class SkillLoader {
             "block",
             "nametag",
             "report",
+            "chart",
         ];
 
         for (const category of categories) {
@@ -269,6 +270,19 @@ export class SkillRegistry {
                 if (skill.whenToUse?.length > 0) {
                     doc += `- **When to use**: ${skill.whenToUse.join("; ")}\n`;
                 }
+
+                // Add examples if available
+                if (skill.examples && skill.examples.length > 0) {
+                    doc += `- **Example usage**:\n`;
+                    const example = skill.examples[0];
+                    if (example.description) {
+                        doc += `  * ${example.description}\n`;
+                    }
+                    if (example.params) {
+                        doc += `  \`\`\`json\n  ${JSON.stringify(example.params, null, 2).split('\n').join('\n  ')}\n  \`\`\`\n`;
+                    }
+                }
+
                 doc += "\n";
             }
         }
@@ -312,6 +326,7 @@ export class SkillRegistry {
             block: "## Block Analysis\n- Get block information by timestamp",
             nametag: "## Address Metadata\n- Get address tags and labels",
             report: "## Report Generation\n- Generate structured markdown analysis reports saved to the report/ directory\n- Summarize all findings and scope data into a formatted document",
+            chart: "## Chart Generation\n- Create line charts for trend visualization (token prices, transaction volumes)\n- Create bar charts for comparison analysis (address metrics, token balances)\n- Create pie charts for proportional data (portfolio distribution, fund flow ratios)\n- Create scatter plots for correlation analysis (transaction amount vs gas fees)\n- Create radar charts for multi-dimensional profiling (address activity, risk assessment)",
             basic: "## Basic Operations\n- Query basic blockchain data",
         };
 
