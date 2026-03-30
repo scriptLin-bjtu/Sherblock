@@ -13,7 +13,7 @@ export default {
     name: "CREATE_RADAR_CHART",
 
     description:
-        "生成雷达图，用于多维度数据对比分析（如地址活动画像、风险评估、综合评分）",
+        "Generate a radar chart for multi-dimensional comparison analysis (e.g., address activity profile, risk assessment, comprehensive scoring)",
 
     category: "chart",
 
@@ -23,59 +23,59 @@ export default {
     },
 
     whenToUse: [
-        "需要对比多个实体在多个维度上的表现",
-        "需要创建地址活动画像或风险评估可视化",
-        "需要展示综合评分或性能指标的多维对比",
+        "Need to compare performance of multiple entities across multiple dimensions",
+        "Need to create address activity profile visualization or risk assessment",
+        "Need to display multi-dimensional comparison of comprehensive scores or performance metrics",
     ],
 
     examples: [
         {
-            description: "地址活动画像分析",
+            description: "Address activity profile analysis",
             params: {
-                title: "地址活动画像对比",
+                title: "Address Activity Profile Comparison",
                 indicators: [
-                    { name: "交易次数", max: 1000 },
-                    { name: "交互地址数", max: 500 },
-{ name: "交易额", max: 1000000 },
-                    { name: "平均Gas", max: 500000 },
-                    { name: "活跃天数", max: 365 },
+                    { name: "Transaction Count", max: 1000 },
+                    { name: "Unique Addresses Interacted", max: 500 },
+                    { name: "Transaction Amount", max: 1000000 },
+                    { name: "Average Gas", max: 500000 },
+                    { name: "Active Days", max: 365 },
                 ],
                 series: [
                     {
-                        name: "地址A",
+                        name: "Address A",
                         data: [800, 200, 500000, 250000, 100],
                     },
                     {
-                        name: "地址B",
+                        name: "Address B",
                         data: [300, 150, 200000, 150000, 50],
                     },
                 ],
                 filename: "address-profile-radar.svg",
-                description: "两个地址在5个维度上的活动对比",
+                description: "Comparison of activity between two addresses across 5 dimensions",
             },
         },
         {
-            description: "风险评估可视化",
+            description: "Risk assessment visualization",
             params: {
-                title: "地址风险评估",
+                title: "Address Risk Assessment",
                 indicators: [
-                    { name: "交易频率", max: 10 },
-                    { name: "资金规模", max: 10 },
-                    { name: "交互复杂度", max: 10 },
-                    { name: "时间集中度", max: 10 },
-                    { name: "地址关联度", max: 10 },
+                    { name: "Transaction Frequency", max: 10 },
+                    { name: "Fund Scale", max: 10 },
+                    { name: "Interaction Complexity", max: 10 },
+                    { name: "Time Concentration", max: 10 },
+                    { name: "Address Correlation", max: 10 },
                 ],
                 series: [
                     {
-                        name: "目标地址",
+                        name: "Target Address",
                         data: [8, 7, 5, 6, 4],
                     },
                     {
-                        name: "正常基准",
+                        name: "Normal Baseline",
                         data: [5, 5, 3, 4, 2],
                     },
                 ],
-                description: "目标地址与正常基准的风险维度对比",
+                description: "Comparison of risk dimensions between target address and normal baseline",
             },
         },
     ],
@@ -136,7 +136,7 @@ export default {
                     skill: "CREATE_RADAR_CHART",
                     success: true,
                     data: {
-                        message: "雷达图已生成并保存到 charts/ 目录",
+                        message: "Radar chart generated and saved to charts/ directory",
                         filePath: result.filePath,
                         filename: result.filename,
                         chartType: "radar",

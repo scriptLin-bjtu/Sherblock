@@ -12,7 +12,7 @@ export default {
     name: "CREATE_PIE_CHART",
 
     description:
-        "生成饼图，用于展示数据的占比关系（如投资组合分布、资金流向比例、交易类型分布等）",
+        "Generate a pie chart for showing proportional data (e.g., portfolio distribution, fund flow ratios, transaction type distribution)",
 
     category: "chart",
 
@@ -22,35 +22,35 @@ export default {
     },
 
     whenToUse: [
-        "需要展示各部分在整体中的占比",
-        "需要分析投资组合、资金流向、交易类型等分布情况",
-        "需要可视化百分比或比例数据",
+        "Need to show the proportion of each part within the whole",
+        "Need to analyze distribution of portfolio, fund flows, transaction types, etc.",
+        "Need to visualize percentage or ratio data",
     ],
 
     examples: [
         {
-            description: "展示投资组合分布",
+            description: "Display portfolio distribution",
             params: {
-                title: "投资组合代币分布",
+                title: "Portfolio Token Distribution",
                 data: [
                     { name: "ETH", value: 50 },
                     { name: "USDC", value: 30 },
                     { name: "WBTC", value: 20 },
                 ],
                 filename: "portfolio-distribution.svg",
-                description: "当前投资组合中各代币的价值占比",
+                description: "Value proportion of each token in the current portfolio",
             },
         },
         {
-            description: "展示交易类型分布",
+            description: "Display transaction type distribution",
             params: {
-                title: "交易类型统计",
+                title: "Transaction Type Statistics",
                 data: [
-                    { name: "转账", value: 150 },
-                    { name: "合约调用", value: 80 },
-                    { name: "代币转账", value: 70 },
+                    { name: "Transfer", value: 150 },
+                    { name: "Contract Call", value: 80 },
+                    { name: "Token Transfer", value: 70 },
                 ],
-                description: "不同类型交易的数量分布",
+                description: "Distribution of different transaction types by count",
             },
         },
     ],
@@ -92,7 +92,7 @@ export default {
                     skill: "CREATE_PIE_CHART",
                     success: true,
                     data: {
-                        message: "饼图已生成并保存到 charts/ 目录",
+                        message: "Pie chart generated and saved to charts/ directory",
                         filePath: result.filePath,
                         filename: result.filename,
                         chartType: "pie",

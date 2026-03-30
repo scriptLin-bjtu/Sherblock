@@ -3,15 +3,15 @@
  * Manages the workflow between QuestionAgent, PlanAgent, and ExecuteAgent
  */
 
-import { EventBus } from './events.js';
-import { WorkflowStateMachine, WorkflowStage } from './state-machine.js';
-import { QuestionAgent } from '../questionBot/agent.js';
-import { PlanAgent } from '../planBot/agent.js';
-import { ExecuteAgent } from '../executeBot/agent.js';
-import { scopeManager } from '../../utils/scope-manager.js';
-import { workspaceManager } from '../../utils/workspace-manager.js';
+import { EventBus } from "./events.js";
+import { WorkflowStateMachine, WorkflowStage } from "./state-machine.js";
+import { QuestionAgent } from "../questionBot/agent.js";
+import { PlanAgent } from "../planBot/agent.js";
+import { ExecuteAgentV2 } from "../executeBot/agent-v2.js";
+import { scopeManager } from "../../utils/scope-manager.js";
+import { workspaceManager } from "../../utils/workspace-manager.js";
 
-export { WorkflowStage } from './state-machine.js';
+export { WorkflowStage } from "./state-machine.js";
 
 export class AgentOrchestrator {
     constructor(callLLM, options = {}) {
@@ -24,10 +24,18 @@ export class AgentOrchestrator {
         // Initialize agents
         this.questionAgent = new QuestionAgent(callLLM);
         this.planAgent = new PlanAgent(callLLM);
-        this.executeAgent = new ExecuteAgent(callLLM, this.scopeManager, {
-            compressionEnabled: options.compressionEnabled,
-            useLegacyPrompt: options.executeAgent?.useLegacyPrompt,
-            compressionConfig: options.executeAgent?.compressionConfig,
+        this.executeAgent = new ExecuteAgentV2(callLLM, scopeManager, {
+            // Compression thresholds (estimated tokens)
+            lightThreshold: 1000000, // Below this: no compression
+            moderateThreshold: 1000000, // Below this: light compression
+            aggressiveThreshold: 1000000, // Below this: moderate compression
+            // Above aggressiveThreshold: LLM-based summarization
+
+            // Summarization triggers (raised thresholds to reduce frequency)
+            historyEntryThreshold: 15, // Summarize when history exceeds this (raised from 8)
+            tokenThreshold: 1000000, // or when tokens exceed this (raised from 6000)
+            preserveRecentEntries: 5, // Always keep this many recent entries (raised from 3)
+            maxSummaries: 3, // Maximum summaries to maintain
         });
 
         // Initialize supporting components
@@ -41,7 +49,7 @@ export class AgentOrchestrator {
             plan: null,
             currentStepIndex: 0,
             executionHistory: [],
-            reviewResults: []
+            reviewResults: [],
         };
 
         // Control flags
@@ -60,37 +68,55 @@ export class AgentOrchestrator {
     _setupStateMachineHooks() {
         this.stateMachine.onEnterState(WorkflowStage.IDLE, async () => {
             this.workflowState.stage = WorkflowStage.IDLE;
-            this._emit('stage:changed', { from: this._lastStage, to: WorkflowStage.IDLE });
+            this._emit("stage:changed", {
+                from: this._lastStage,
+                to: WorkflowStage.IDLE,
+            });
             this._lastStage = WorkflowStage.IDLE;
         });
 
         this.stateMachine.onEnterState(WorkflowStage.COLLECTING, async () => {
             this.workflowState.stage = WorkflowStage.COLLECTING;
-            this._emit('stage:changed', { from: this._lastStage, to: WorkflowStage.COLLECTING });
+            this._emit("stage:changed", {
+                from: this._lastStage,
+                to: WorkflowStage.COLLECTING,
+            });
             this._lastStage = WorkflowStage.COLLECTING;
         });
 
         this.stateMachine.onEnterState(WorkflowStage.PLANNING, async () => {
             this.workflowState.stage = WorkflowStage.PLANNING;
-            this._emit('stage:changed', { from: this._lastStage, to: WorkflowStage.PLANNING });
+            this._emit("stage:changed", {
+                from: this._lastStage,
+                to: WorkflowStage.PLANNING,
+            });
             this._lastStage = WorkflowStage.PLANNING;
         });
 
         this.stateMachine.onEnterState(WorkflowStage.EXECUTING, async () => {
             this.workflowState.stage = WorkflowStage.EXECUTING;
-            this._emit('stage:changed', { from: this._lastStage, to: WorkflowStage.EXECUTING });
+            this._emit("stage:changed", {
+                from: this._lastStage,
+                to: WorkflowStage.EXECUTING,
+            });
             this._lastStage = WorkflowStage.EXECUTING;
         });
 
         this.stateMachine.onEnterState(WorkflowStage.REVIEWING, async () => {
             this.workflowState.stage = WorkflowStage.REVIEWING;
-            this._emit('stage:changed', { from: this._lastStage, to: WorkflowStage.REVIEWING });
+            this._emit("stage:changed", {
+                from: this._lastStage,
+                to: WorkflowStage.REVIEWING,
+            });
             this._lastStage = WorkflowStage.REVIEWING;
         });
 
         this.stateMachine.onEnterState(WorkflowStage.COMPLETED, async () => {
             this.workflowState.stage = WorkflowStage.COMPLETED;
-            this._emit('stage:changed', { from: this._lastStage, to: WorkflowStage.COMPLETED });
+            this._emit("stage:changed", {
+                from: this._lastStage,
+                to: WorkflowStage.COMPLETED,
+            });
             this._lastStage = WorkflowStage.COMPLETED;
         });
 
@@ -114,11 +140,11 @@ export class AgentOrchestrator {
             await this.executeAgent.initialize();
 
             // Start workflow
-            this._emit('workflow:started', { initialInput });
+            this._emit("workflow:started", { initialInput });
 
             // Transition to collecting phase
             await this.stateMachine.transition(WorkflowStage.COLLECTING, {
-                infos: this.questionAgent.getinfos()
+                infos: this.questionAgent.getinfos(),
             });
 
             // Phase 1: Collect requirements
@@ -130,13 +156,16 @@ export class AgentOrchestrator {
 
             // Phase 2: Create plan
             await this.stateMachine.transition(WorkflowStage.PLANNING, {
-                infos
+                infos,
             });
             const plan = await this._createPlan(infos);
             this.workflowState.plan = plan;
 
             // Initialize scope from plan
-            this.workflowState.scope = { ...this.workflowState.scope, ...plan.scope };
+            this.workflowState.scope = {
+                ...this.workflowState.scope,
+                ...plan.scope,
+            };
 
             // Write updated scope to file
             await this.scopeManager.write(this.workflowState.scope);
@@ -146,11 +175,14 @@ export class AgentOrchestrator {
 
             // Complete workflow - only transition in appropriate states
             const currentState = this.stateMachine.getState();
-            if (currentState === WorkflowStage.EXECUTING || currentState === WorkflowStage.REVIEWING) {
+            if (
+                currentState === WorkflowStage.EXECUTING ||
+                currentState === WorkflowStage.REVIEWING
+            ) {
                 await this.stateMachine.transition(WorkflowStage.COMPLETED, {
                     plan: this.workflowState.plan,
                     scope: this.workflowState.scope,
-                    currentStepIndex: this.workflowState.currentStepIndex
+                    currentStepIndex: this.workflowState.currentStepIndex,
                 });
             } else if (currentState === WorkflowStage.PLANNING) {
                 // If in PLANNING state (due to review modifying plan), transition directly to COMPLETED
@@ -158,16 +190,18 @@ export class AgentOrchestrator {
                 await this.stateMachine.transition(WorkflowStage.COMPLETED, {
                     plan: this.workflowState.plan,
                     scope: this.workflowState.scope,
-                    currentStepIndex: this.workflowState.currentStepIndex
+                    currentStepIndex: this.workflowState.currentStepIndex,
                 });
             }
 
-            this._emit('workflow:completed', { result });
+            this._emit("workflow:completed", { result });
 
             return { result };
-
         } catch (error) {
-            this._emit('workflow:error', { error: error.message, stack: error.stack });
+            this._emit("workflow:error", {
+                error: error.message,
+                stack: error.stack,
+            });
             throw error;
         }
     }
@@ -177,7 +211,7 @@ export class AgentOrchestrator {
      * @private
      */
     async _collectRequirements(initialInput) {
-        this._emit('collection:started', { initialInput });
+        this._emit("collection:started", { initialInput });
 
         try {
             // Get or create readline interface for user input
@@ -186,7 +220,7 @@ export class AgentOrchestrator {
 
             if (!rl) {
                 // Create a readline interface if not provided
-                const readlineModule = await import('node:readline');
+                const readlineModule = await import("node:readline");
                 rl = readlineModule.createInterface({
                     input: process.stdin,
                     output: process.stdout,
@@ -196,30 +230,32 @@ export class AgentOrchestrator {
 
             const askUser = (question) => {
                 return new Promise((resolve) => {
-                    rl.question(question + '\n', resolve);
+                    rl.question(question + "\n", resolve);
                 });
             };
 
             // Use QuestionAgent's collectRequirements method
-            const infos = await this.questionAgent.collectRequirements(initialInput, {
-                onQuestion: async (question) => {
-                    this._emit('question:asked', { question });
-                    // Get user input from stdin
-                    const answer = await askUser(question);
-                    return answer;
-                }
-            });
+            const infos = await this.questionAgent.collectRequirements(
+                initialInput,
+                {
+                    onQuestion: async (question) => {
+                        this._emit("question:asked", { question });
+                        // Get user input from stdin
+                        const answer = await askUser(question);
+                        return answer;
+                    },
+                },
+            );
 
             // Close readline if we created it
             if (createdRl && rl) {
                 rl.close();
             }
 
-            this._emit('collection:completed', { infos });
+            this._emit("collection:completed", { infos });
             return infos;
-
         } catch (error) {
-            this._emit('collection:error', { error: error.message });
+            this._emit("collection:error", { error: error.message });
             // Re-throw with additional context
             throw new Error(`Failed to collect requirements: ${error.message}`);
         }
@@ -230,7 +266,7 @@ export class AgentOrchestrator {
      * @private
      */
     async _createPlan(infos) {
-        this._emit('planning:started', { infos });
+        this._emit("planning:started", { infos });
 
         try {
             // Ensure executeAgent is initialized to access skill registry
@@ -239,16 +275,18 @@ export class AgentOrchestrator {
             }
 
             // Get capability summary from skill registry
-            const capabilitiesDoc = this.executeAgent.skillRegistry.generateCapabilitySummary();
-            console.log('[Orchestrator] Generated capability summary for planning');
+            const capabilitiesDoc =
+                this.executeAgent.skillRegistry.generateCapabilitySummary();
+            console.log(
+                "[Orchestrator] Generated capability summary for planning",
+            );
 
             const plan = await this.planAgent.makePlan(infos, capabilitiesDoc);
 
-            this._emit('planning:completed', { plan });
+            this._emit("planning:completed", { plan });
             return plan;
-
         } catch (error) {
-            this._emit('planning:error', { error: error.message });
+            this._emit("planning:error", { error: error.message });
             throw error;
         }
     }
@@ -258,16 +296,19 @@ export class AgentOrchestrator {
      * @private
      */
     async _executeWithReview() {
-        this._emit('execution:started', {
-            totalSteps: this.workflowState.plan.steps?.length || 0
+        this._emit("execution:started", {
+            totalSteps: this.workflowState.plan.steps?.length || 0,
         });
 
         const results = [];
 
-        while (this.workflowState.currentStepIndex < this.workflowState.plan.steps.length) {
+        while (
+            this.workflowState.currentStepIndex <
+            this.workflowState.plan.steps.length
+        ) {
             // Check for stop signal
             if (this._stopped) {
-                throw new Error('Workflow stopped by user');
+                throw new Error("Workflow stopped by user");
             }
 
             // Wait if paused
@@ -289,10 +330,10 @@ export class AgentOrchestrator {
                 plan: this.workflowState.plan,
                 scope: this.workflowState.scope,
                 stepIndex,
-                step
+                step,
             });
 
-            this._emit('step:started', { stepIndex, step });
+            this._emit("step:started", { stepIndex, step });
 
             const result = await this._executeSingleStep(step);
             results.push(result);
@@ -301,14 +342,17 @@ export class AgentOrchestrator {
                 stepIndex,
                 step,
                 result,
-                timestamp: Date.now()
+                timestamp: Date.now(),
             });
 
-            this._emit('step:completed', { stepIndex, result });
+            this._emit("step:completed", { stepIndex, result });
 
             // Update scope with results
             if (result.scope) {
-                this.workflowState.scope = { ...this.workflowState.scope, ...result.scope };
+                this.workflowState.scope = {
+                    ...this.workflowState.scope,
+                    ...result.scope,
+                };
             }
 
             // Review step
@@ -317,27 +361,28 @@ export class AgentOrchestrator {
                 scope: this.workflowState.scope,
                 currentStepIndex: this.workflowState.currentStepIndex,
                 stepIndex,
-                stepResult: result
+                stepResult: result,
             });
 
-            this._emit('review:started', { stepIndex });
+            this._emit("review:started", { stepIndex });
 
             const reviewResult = await this._reviewStepExecution(step, result);
 
             this.workflowState.reviewResults.push({
                 stepIndex,
                 reviewResult,
-                timestamp: Date.now()
+                timestamp: Date.now(),
             });
 
-            this._emit('review:completed', {
+            this._emit("review:completed", {
                 stepIndex,
                 decision: reviewResult.decision,
-                adjustments: reviewResult.adjustments
+                adjustments: reviewResult.adjustments,
             });
 
             // Handle review decision
-            const shouldContinue = await this._handleReviewDecision(reviewResult);
+            const shouldContinue =
+                await this._handleReviewDecision(reviewResult);
 
             if (!shouldContinue) {
                 // Even when terminating, increment step index to mark this step as completed
@@ -350,7 +395,7 @@ export class AgentOrchestrator {
             this.workflowState.currentStepIndex++;
         }
 
-        this._emit('execution:completed', { results });
+        this._emit("execution:completed", { results });
         return { results, history: this.workflowState.executionHistory };
     }
 
@@ -362,15 +407,15 @@ export class AgentOrchestrator {
         try {
             const result = await this.executeAgent.executeStep(
                 this.workflowState.scope,
-                step
+                step,
             );
             return result;
         } catch (error) {
             return {
-                status: 'failure',
+                status: "failure",
                 reason: error.message,
                 scope: this.workflowState.scope,
-                history: []
+                history: [],
             };
         }
     }
@@ -385,18 +430,18 @@ export class AgentOrchestrator {
                 step,
                 executionResult,
                 this.workflowState.scope,
-                this.workflowState.plan
+                this.workflowState.plan,
             );
             return reviewResult;
         } catch (error) {
             // If review fails, default to continuing
             return {
-                assessment: 'partial',
+                assessment: "partial",
                 findings: `Review failed: ${error.message}`,
-                decision: 'CONTINUE',
+                decision: "CONTINUE",
                 adjustments: [],
-                reason: 'Review error, defaulting to continue',
-                nextStepRecommendation: 'continue'
+                reason: "Review error, defaulting to continue",
+                nextStepRecommendation: "continue",
             };
         }
     }
@@ -409,16 +454,16 @@ export class AgentOrchestrator {
         const { decision, adjustments } = reviewResult;
 
         switch (decision) {
-            case 'CONTINUE':
+            case "CONTINUE":
                 // Proceed to next step
                 return true;
 
-            case 'MODIFY_PLAN':
+            case "MODIFY_PLAN":
                 // Apply adjustments and return to planning
                 if (adjustments && adjustments.length > 0) {
                     this.workflowState.plan = this.planAgent.adjustPlan(
                         this.workflowState.plan,
-                        adjustments
+                        adjustments,
                     );
                 }
                 // Reset to planning phase to regenerate with modifications
@@ -426,45 +471,48 @@ export class AgentOrchestrator {
                 await this.stateMachine.transition(WorkflowStage.PLANNING, {
                     infos: this.workflowState.scope,
                     scope: this.workflowState.scope,
-                    plan: this.workflowState.plan
+                    plan: this.workflowState.plan,
                 });
                 return true;
 
-            case 'ADD_STEPS':
+            case "ADD_STEPS":
                 // Add new steps to plan
                 if (adjustments && adjustments.length > 0) {
                     this.workflowState.plan = this.planAgent.adjustPlan(
                         this.workflowState.plan,
-                        adjustments
+                        adjustments,
                     );
                 }
                 return true;
 
-            case 'REMOVE_STEPS':
+            case "REMOVE_STEPS":
                 // Remove steps from plan
                 if (adjustments && adjustments.length > 0) {
                     this.workflowState.plan = this.planAgent.adjustPlan(
                         this.workflowState.plan,
-                        adjustments
+                        adjustments,
                     );
                 }
                 return true;
 
-            case 'REORDER':
+            case "REORDER":
                 // Reorder remaining steps
                 if (adjustments && adjustments.length > 0) {
-                    const reorderAdjustment = adjustments.find(a => a.type === 'reorder');
+                    const reorderAdjustment = adjustments.find(
+                        (a) => a.type === "reorder",
+                    );
                     if (reorderAdjustment && reorderAdjustment.newOrder) {
-                        this.workflowState.plan = this.planAgent.reorderRemainingSteps(
-                            this.workflowState.plan,
-                            reorderAdjustment.newOrder,
-                            this.workflowState.currentStepIndex  // pass current step index
-                        );
+                        this.workflowState.plan =
+                            this.planAgent.reorderRemainingSteps(
+                                this.workflowState.plan,
+                                reorderAdjustment.newOrder,
+                                this.workflowState.currentStepIndex, // pass current step index
+                            );
                     }
                 }
                 return true;
 
-            case 'TERMINATE':
+            case "TERMINATE":
                 // Terminate workflow
                 return false;
 
@@ -517,7 +565,7 @@ export class AgentOrchestrator {
     getState() {
         return {
             ...this.workflowState,
-            stage: this.stateMachine.getState()
+            stage: this.stateMachine.getState(),
         };
     }
 
@@ -526,7 +574,7 @@ export class AgentOrchestrator {
      */
     pause() {
         this._paused = true;
-        this._emit('workflow:paused', {});
+        this._emit("workflow:paused", {});
     }
 
     /**
@@ -539,7 +587,7 @@ export class AgentOrchestrator {
             this._pauseResolve = null;
             this._pausePromise = null;
         }
-        this._emit('workflow:resumed', {});
+        this._emit("workflow:resumed", {});
     }
 
     /**
@@ -550,6 +598,6 @@ export class AgentOrchestrator {
         if (this._paused) {
             this.resume(); // Resume to allow stopping
         }
-        this._emit('workflow:stopped', {});
+        this._emit("workflow:stopped", {});
     }
 }

@@ -65,6 +65,13 @@ export async function callLLM({
     // 确定最终使用的模型名称
     const finalModel = modelName || provider.defaultModel;
 
+    // 根据 provider 自动选择环境变量作为 apiKey 默认值
+    const finalApiKey = apiKey || (
+        modelProvider === 'deepseek' || modelProvider === 'deepseek-reasoner'
+            ? process.env.DEEPSEEK_API_KEY
+            : process.env.GLM_API_KEY
+    );
+
     // 构建基础请求体
     const baseBody = {
         model: finalModel,
@@ -187,7 +194,7 @@ export async function callLLM({
 
             const res = await fetch(provider.url, {
                 method: "POST",
-                headers: provider.headers(apiKey),
+                headers: provider.headers(finalApiKey),
                 body: JSON.stringify(requestBody),
                 signal: controller.signal,
             });

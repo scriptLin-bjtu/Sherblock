@@ -45,9 +45,10 @@ export class SkillLoader {
                     if (
                         entry.isDirectory() &&
                         !entry.name.startsWith("_") &&
-                        entry.name !== "templates"
+                        entry.name !== "templates" &&
+                        entry.name !== "lib"
                     ) {
-                        // 过滤 templates 目录
+                        // 过滤 templates 和 lib 目录
                         skills.push({
                             id: `${category}/${entry.name}`,
                             path: join(categoryPath, entry.name),
@@ -105,21 +106,6 @@ export class SkillLoader {
     }
 }
 
-// Skill name aliases to handle common LLM naming variations
-const SKILL_ALIASES = {
-    // Common LLM variations for transaction skills
-    GET_NORMAL_TRANSACTIONS: "GET_TRANSACTIONS",
-    GET_NORMAL_TXS: "GET_TRANSACTIONS",
-    GET_TX_LIST: "GET_TRANSACTIONS",
-    LIST_TRANSACTIONS: "GET_TRANSACTIONS",
-    GET_CURRENT_BLOCK: "ETH_BLOCK_NUMBER",
-    GET_LATEST_BLOCK: "ETH_BLOCK_NUMBER",
-    GET_BLOCK_NUMBER: "ETH_BLOCK_NUMBER",
-
-    // Event logs skill alias
-    GET_EVENT_LOGS: "GET_TRANSACTION_LOGS",
-};
-
 export class SkillRegistry {
     constructor() {
         this.loader = new SkillLoader();
@@ -161,23 +147,13 @@ export class SkillRegistry {
     }
 
     /**
-     * Resolve skill name, checking aliases if exact match not found
+     * Resolve skill name - exact match only (no aliases)
      */
     resolveSkillName(name) {
-        // First try exact match
+        // Only exact match is supported
         if (this.skills.has(name)) {
             return name;
         }
-
-        // Check aliases
-        const aliasedName = SKILL_ALIASES[name];
-        if (aliasedName && this.skills.has(aliasedName)) {
-            console.log(
-                `[SkillRegistry] Resolved alias "${name}" to "${aliasedName}"`,
-            );
-            return aliasedName;
-        }
-
         return null;
     }
 
@@ -201,6 +177,13 @@ export class SkillRegistry {
                 category,
             }),
         );
+    }
+
+    /**
+     * Get all skill names as an array
+     */
+    getAllSkillNames() {
+        return Array.from(this.skills.keys());
     }
 
     getSkillsByCategory(category) {
@@ -239,14 +222,6 @@ export class SkillRegistry {
 
     generateDocumentation() {
         let doc = "## Available Blockchain Analysis Skills\n\n";
-
-        // Add note about common aliases
-        doc += "### Common Skill Name Aliases\n";
-        doc += "The following aliases are also supported:\n";
-        doc += "- `GET_NORMAL_TRANSACTIONS` → `GET_TRANSACTIONS`\n";
-        doc += "- `GET_EVENT_LOGS` → `GET_TRANSACTION_LOGS`\n";
-        doc += "- `GET_CURRENT_BLOCK` → `ETH_BLOCK_NUMBER`\n";
-        doc += "- `GET_LATEST_BLOCK` → `ETH_BLOCK_NUMBER`\n\n";
 
         const byCategory = new Map();
         for (const skill of this.skills.values()) {

@@ -11,7 +11,7 @@
  * These can be cached by LLM providers, saving tokens on subsequent calls.
  */
 
-import { SkillRegistry, SUPPORTED_CHAINS } from "./skills/index.js";
+import { skillRegistry, SUPPORTED_CHAINS } from "./skills/index.js";
 
 // Cache for system prompt
 let systemPromptCache = null;
@@ -21,9 +21,9 @@ let systemPromptCache = null;
  * The system prompt contains all static/fixed content that can be cached by LLM providers
  * @param {Object} options - Options for generating the prompt
  * @param {boolean} options.forceRegenerate - Force regeneration even if cached
- * @returns {string} - The system prompt
+ * @returns {Promise<string>} - The system prompt
  */
-export function getSystemPrompt(options = {}) {
+export async function getSystemPrompt(options = {}) {
     const { forceRegenerate = false } = options;
 
     // Return cached version if available
@@ -31,8 +31,12 @@ export function getSystemPrompt(options = {}) {
         return systemPromptCache;
     }
 
-    // Get skills documentation
-    const skillRegistry = new SkillRegistry();
+    // Ensure skillRegistry is initialized
+    if (!skillRegistry.initialized) {
+        await skillRegistry.initialize();
+    }
+
+    // Get skills documentation from the initialized singleton
     const skillsDoc = skillRegistry.generateDocumentation();
 
     // Format supported chains
@@ -78,7 +82,7 @@ Use this to query blockchain data via Etherscan API.
 - thought: Your reasoning for this action
 - action_type: "USE_SKILL"
 - skill_name: Name of the skill from the available skills
-- params: Object with required parameters for the skill
+- params: Object with (optional) parameters for the skill
 - chain_id: (optional) Chain ID to query, defaults to scope's chain
 
 **IMPORTANT - Parameter Naming:**
@@ -105,7 +109,7 @@ Use this to record important discoveries that should persist.
 \`\`\`
 
 ## 3. FINISH — Complete this step
-Use this when you have accomplished the step's goal and met success criteria.
+Use when you have accomplished the step's goal and met success criteria.
 
 \`\`\`json
 {
@@ -163,9 +167,67 @@ Always refer to the step's \`success_criteria\` field to determine when to FINIS
 - Use pagination for large result sets (default: 100 items per page)
 - Target the correct chain based on scope
 
+# Report Generation Requirements
+
+**IMPORTANT**: When a step goal involves generating reports or documents, you MUST call \`USE_SKILL\` with skill_name \`GENERATE_MARKDOWN_REPORT\`.
+
+## Report Generation Skill:
+- \`GENERATE_MARKDOWN_REPORT\` - Generate structured markdown analysis reports saved to reports/ directory
+
+**Content Constraint**: The \`content\` parameter MUST NOT contain any image references (markdown image syntax like \`![alt](path)\`) because images are automatically loaded and inserted by the system code from the charts/ directory.
+
+### GENERATE_MARKDOWN_REPORT Parameters:
+\`\`\`json
+{
+  "params": {
+    "title": "Polygon Transaction Analysis Report",
+    "filename": "polygon-tx-analysis",
+    "content": "## Executive Summary\n\n...",
+    "sections": [
+      { "heading": "Technical Analysis", "content": "..." }
+    ]
+  }
+}
+\`\`\`
+
+**IMPORTANT Constraints:**
+- The \`content\` parameter must NOT contain any image references (markdown image syntax like \`![alt](path)\`)
+- Images will be automatically loaded and inserted by the system from the charts/ directory
+
+### Correct Report Generation Example:
+
+\`\`\`json
+{
+  "thought": "I have completed the analysis and need to generate a markdown report. I have prepared comprehensive analysis content.",
+  "action_type": "USE_SKILL",
+  "skill_name": "GENERATE_MARKDOWN_REPORT",
+  "params": {
+    "title": "Polygon Transaction Analysis Report",
+    "filename": "polygon-tx-analysis-0x123",
+    "content": "# Polygon Transaction Analysis Report\n\n## Executive Summary\n\n..."
+  }
+}
+\`\`\`
+
+### Incorrect Pattern - DO NOT DO THIS:
+
+\`\`\`json
+{
+  "thought": "I'll create report configuration and store it in scope",
+  "action_type": "UPDATEUPDATE_SCOPE",
+  "updates": {
+    "analysis_report": { ... }
+  }
+}
+\`\`\`
+
+**The above pattern is incorrect because:** it only stores configuration but does NOT actually write the report file to disk. You MUST call \`GENERATE_MARKDOWN_REPORT\` skill to create the actual markdown file.
+
 # Chart Generation Requirements
 
 **IMPORTANT**: When a step goal involves creating charts or visualizations, you MUST call \`USE_SKILL\` to execute chart generation skills. Do NOT simply create chart configuration objects and store them in scope.
+
+**Filename Constraint**: The \`filename\` parameter (when provided) must end with the .svg extension.
 
 ## Chart Generation Skills Available:
 - \`CREATE_LINE_CHART\` - Line charts for trends over time

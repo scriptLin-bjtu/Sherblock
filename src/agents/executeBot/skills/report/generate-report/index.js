@@ -2,7 +2,7 @@
  * Generate Markdown Report Skill
  *
  * Generates a structured markdown analysis report from the current workflow
- * scope and saves it to the project root's `report/` directory.
+ * scope and saves it to the project's `reports/` directory.
  */
 
 import { writeFile, mkdir, readdir } from "fs/promises";
@@ -57,7 +57,7 @@ function renderObject(obj, indent = "") {
 
 /**
  * Get all SVG files from the charts directory.
- * Returns an array of SVG filenames, or empty array if directory doesn't exist or has no SVG files.
+ * Returns an array of SVG filenames, or empty array if the directory doesn't exist or has no SVG files.
  */
 async function getChartFiles() {
     try {
@@ -82,7 +82,7 @@ function buildChartsSection(chartFiles) {
         return "";
     }
 
-    let section = "## 可视化图表\n\n";
+    let section = "## Visualization Charts\n\n";
 
     for (const file of chartFiles) {
         // Extract title from filename (remove .svg extension)
@@ -103,7 +103,7 @@ function buildMarkdownReport(title, scope, extraSections = [], chartFiles = []) 
     // Title & metadata
     lines.push(`# ${title}`);
     lines.push("");
-    lines.push(`> **生成时间**: ${now.toLocaleString("zh-CN")}  `);
+    lines.push(`> **Generated at**: ${now.toLocaleString("en-US")}  `);
     if (workspaceManager.isInitialized()) {
         lines.push(
             `> **Workspace ID**: ${workspaceManager.getWorkspaceId()}  `,
@@ -114,15 +114,15 @@ function buildMarkdownReport(title, scope, extraSections = [], chartFiles = []) 
     lines.push("");
 
     // Table of contents
-    lines.push("## 目录");
+    lines.push("## Table of Contents");
     lines.push("");
-    lines.push("1. [分析摘要](#分析摘要)");
-    lines.push("2. [分析目标](#分析目标)");
-    lines.push("3. [关键发现](#关键发现)");
-    lines.push("4. [详细数据](#详细数据)");
+    lines.push("1. [Analysis Summary](#analysis-summary)");
+    lines.push("2. [Analysis Goals](#analysis-goals)");
+    lines.push("3. [Key Findings](#key-findings)");
+    lines.push("4. [Detailed Data](#detailed-data)");
     // Add charts section to TOC if charts exist
     if (chartFiles.length > 0) {
-        lines.push("5. [可视化图表](#可视化图表)");
+        lines.push("5. [Visualization Charts](#visualization-charts)");
     }
     if (extraSections.length > 0) {
         const baseIndex = 5 + (chartFiles.length > 0 ? 1 : 0);
@@ -137,7 +137,7 @@ function buildMarkdownReport(title, scope, extraSections = [], chartFiles = []) 
     lines.push("");
 
     // 1. Summary
-    lines.push("## 分析摘要");
+    lines.push("## Analysis Summary");
     lines.push("");
     const summary =
         scope?.summary || scope?.analysis_summary || scope?.conclusion || null;
@@ -146,30 +146,30 @@ function buildMarkdownReport(title, scope, extraSections = [], chartFiles = []) 
             typeof summary === "string" ? summary : renderObject(summary),
         );
     } else {
-        lines.push("_暂无摘要信息，请参阅下方详细数据。_");
+        lines.push("_No summary information available. Please refer to the detailed data below._");
     }
     lines.push("");
 
     // 2. Goals
-    lines.push("## 分析目标");
+    lines.push("## Analysis Goals");
     lines.push("");
     const goal = scope?.goal || scope?.target || scope?.analysis_goal || null;
     if (goal) {
         lines.push(typeof goal === "string" ? goal : renderObject(goal));
     } else {
-        lines.push("_未记录分析目标。_");
+        lines.push("_No analysis goals recorded._");
     }
     lines.push("");
 
     // 3. Key findings
-    lines.push("## 关键发现");
+    lines.push("## Key Findings");
     lines.push("");
     const findings =
         scope?.findings || scope?.key_findings || scope?.results || null;
     if (findings) {
         if (Array.isArray(findings)) {
             findings.forEach((f, i) => {
-                lines.push(`### 发现 ${i + 1}`);
+                lines.push(`### Finding ${i + 1}`);
                 lines.push("");
                 lines.push(typeof f === "string" ? f : renderObject(f));
                 lines.push("");
@@ -182,12 +182,12 @@ function buildMarkdownReport(title, scope, extraSections = [], chartFiles = []) 
             );
         }
     } else {
-        lines.push("_暂无关键发现记录。_");
+        lines.push("_No key findings recorded._");
     }
     lines.push("");
 
     // 4. Detailed data - all remaining scope keys
-    lines.push("## 详细数据");
+    lines.push("## Detailed Data");
     lines.push("");
     const skippedKeys = new Set([
         "summary",
@@ -204,7 +204,7 @@ function buildMarkdownReport(title, scope, extraSections = [], chartFiles = []) 
         ([k]) => !skippedKeys.has(k),
     );
     if (detailEntries.length === 0) {
-        lines.push("_暂无详细数据。_");
+        lines.push("_No detailed data available._");
     } else {
         detailEntries.forEach(([key, value]) => {
             lines.push(`### ${key}`);
@@ -242,7 +242,7 @@ function buildMarkdownReport(title, scope, extraSections = [], chartFiles = []) 
 
     lines.push("---");
     lines.push("");
-    lines.push("*本报告由 Sherblock 区块链行为分析系统自动生成*");
+    lines.push("*This report was automatically generated by the Sherblock Blockchain Behavior Analysis System*");
 
     return lines.join("\n");
 }
@@ -251,33 +251,43 @@ export default {
     name: "GENERATE_MARKDOWN_REPORT",
 
     description:
-        "生成结构化的 Markdown 分析报告文件，保存到项目根目录的 report/ 文件夹。报告包含分析摘要、目标、关键发现和详细数据。",
+        "Generate a structured markdown analysis report file and save it to the project's reports/ directory. If the content parameter is provided, use the custom content directly; otherwise, generate a report from the scope containing summary, goals, key findings, and detailed data. IMPORTANT: The 'content' parameter should NOT contain any image references (markdown image syntax like ![alt](path)). Images will be automatically loaded and inserted by the system code from the charts/ directory.",
 
     category: "report",
 
     params: {
         required: ["title"],
-        optional: ["filename", "summary", "sections"],
+        optional: ["filename", "summary", "sections", "content"],
     },
 
     whenToUse: [
-        "分析完成后需要生成正式报告文档",
-        "需要将分析结果导出为 Markdown 文件",
-        "需要保存分析报告到本地文件系统",
-        "分析结束阶段汇总所有发现并输出报告",
+        "Analysis is complete and a formal report document is needed",
+        "Analysis results need to be exported to a Markdown file",
+        "Analysis report needs to be saved to the local file system",
+        "End of analysis phase to summarize all findings and output a report",
     ],
 
     async execute(params, context) {
-        const { title, filename, summary, sections } = params;
+        const { title, filename, summary, sections, content } = params;
 
         try {
+            // Validate content - should not contain image references
+            if (content && typeof content === 'string') {
+                const imagePattern = /!\[([^\]]*)\]\([^)]+\)/g;
+                const images = content.match(imagePattern);
+                if (images && images.length > 0) {
+                    console.warn(
+                        `[GENERATE_MARKDOWN_REPORT] Content contains ${images.length} image reference(s). Images will be automatically inserted by system code. Found: ${images.slice(0, 2).join(', ')}${images.length > 2 ? '...' : ''}`
+                    );
+                }
+            }
             // Determine output directory: use workspace reports dir if available,
-            // otherwise fall back to {cwd}/report/
+            // otherwise fall back to {cwd}/reports/
             let reportDir;
             if (workspaceManager.isInitialized()) {
                 reportDir = workspaceManager.getReportsPath();
             } else {
-                reportDir = join(process.cwd(), "report");
+                reportDir = join(process.cwd(), "reports");
             }
             await mkdir(reportDir, { recursive: true });
 
@@ -302,19 +312,39 @@ export default {
                 scope = { ...scope, summary };
             }
 
-            // Build extra sections
-            const extraSections = Array.isArray(sections) ? sections : [];
+            // If custom content is provided, use it directly
+            // Otherwise build report from scope
+            let markdownContent;
+            if (content && typeof content === "string") {
+                // Use provided content directly
+                markdownContent = content;
 
-            // Get SVG chart files from charts directory
-            const chartFiles = await getChartFiles();
+                // If content doesn't have visualization charts section but charts exist, append it
+                const chartFiles = await getChartFiles();
+                if (chartFiles.length > 0 && !content.includes("## Visualization Charts")) {
+                    const chartsSection = buildChartsSection(chartFiles);
+                    markdownContent += "\n\n---\n\n" + chartsSection + "\n";
+                }
 
-            // Build and write markdown
-            const markdownContent = buildMarkdownReport(
-                title,
-                scope,
-                extraSections,
-                chartFiles,
-            );
+                // Ensure footer exists
+                if (!content.includes("Sherblock")) {
+                    markdownContent += "\n\n---\n\n*This report was automatically generated by the Sherblock Blockchain Behavior Analysis System*";
+                }
+            } else {
+                // Build extra sections
+                const extraSections = Array.isArray(sections) ? sections : [];
+
+                // Get SVG chart files from charts directory
+                const chartFiles = await getChartFiles();
+
+                // Build and write markdown
+                markdownContent = buildMarkdownReport(
+                    title,
+                    scope,
+                    extraSections,
+                    chartFiles,
+                );
+            }
             await writeFile(outputPath, markdownContent, "utf-8");
 
             console.log(
@@ -327,7 +357,7 @@ export default {
                     skill: "GENERATE_MARKDOWN_REPORT",
                     success: true,
                     data: {
-                        message: `报告已生成并保存到 report/ 目录`,
+                        message: `Report generated and saved to reports/ directory`,
                         filePath: outputPath,
                         filename: outputFilename,
                         reportDir,

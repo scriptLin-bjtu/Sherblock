@@ -11,6 +11,10 @@ This is a **Blockchain Transaction Behavior Analysis Agent** - a multi-agent sys
 3. **ExecuteAgent** (`src/agents/executeBot/`) - Step execution using ReAct pattern with blockchain skills
 4. **AgentOrchestrator** (`src/agents/orchestrator/`) - Central coordinator managing workflow state transitions
 
+## System Environment
+
+This system runs on **Windows** platform. All file paths, shell commands, and environment configurations should be compatible with Windows operating system.
+
 ## Architecture
 
 ### Agent Architecture (Plan-and-Execute)

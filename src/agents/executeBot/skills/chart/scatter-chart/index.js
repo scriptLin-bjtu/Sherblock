@@ -1,8 +1,7 @@
 /**
  * CREATE_SCATTER_CHART Skill
  *
- * Generates a scatter plot for analyzing correlations between two variables
- * (e.g., transaction amount vs gas fee)
+ * Generates a scatter plot for analyzing correlations (e.g., transaction amount vs gas fee)
  */
 
 import { generateChart } from "../../lib/chart-generator.js";
@@ -13,7 +12,7 @@ export default {
     name: "CREATE_SCATTER_CHART",
 
     description:
-        "生成散点图，用于分析两个变量之间的相关性（如交易金额与 Gas 费用的关系）",
+        "Generate a scatter plot for analyzing correlations between two variables (e.g., transaction amount vs gas fee)",
 
     category: "chart",
 
@@ -23,19 +22,19 @@ export default {
     },
 
     whenToUse: [
-        "需要分析两个变量之间的相关关系",
-        "需要展示数据点的分布模式",
-        "需要发现数据中的异常值或趋势",
+        "Need to analyze correlation between two variables",
+        "Need to display data point distribution patterns",
+        "Need to identify outliers or trends in data",
     ],
 
     examples: [
         {
-            description: "分析交易金额与 Gas 费用的关系",
+            description: "Analyze relationship between transaction amount and gas fee",
             params: {
-                title: "交易金额 vs Gas费用",
+                title: "Transaction Amount vs Gas Fee",
                 series: [
                     {
-                        name: "交易",
+                        name: "Transactions",
                         data: [
                             [1000000, 21000],
                             [5000000, 45000],
@@ -45,19 +44,19 @@ export default {
                         ],
                     },
                 ],
-                xAxisName: "交易金额 (Wei)",
-                yAxisName: "Gas费用 (Wei)",
+                xAxisName: "Transaction Amount (Wei)",
+                yAxisName: "Gas Fee (Wei)",
                 filename: "tx-amount-vs-gas.svg",
-                description: "交易金额与所需 Gas 费用的关系分析",
+                description: "Analysis of relationship between transaction amount and required gas fee",
             },
         },
         {
-            description: "多系列散点对比",
+            description: "Multi-series scatter comparison",
             params: {
-                title: "地址活动时间 vs 交易数",
+                title: "Address Activity Days vs Transaction Count",
                 series: [
                     {
-                        name: "活跃地址",
+                        name: "Active Address",
                         data: [
                             [10, 50],
                             [30, 150],
@@ -67,7 +66,7 @@ export default {
                         ],
                     },
                     {
-                        name: "普通地址",
+                        name: "Normal Address",
                         data: [
                             [5, 10],
                             [15, 20],
@@ -77,9 +76,9 @@ export default {
                         ],
                     },
                 ],
-                xAxisName: "活跃天数",
-                yAxisName: "交易数量",
-                description: "不同类型地址的活跃度对比",
+                xAxisName: "Active Days",
+                yAxisName: "Transaction Count",
+                description: "Activity level comparison between different address types",
             },
         },
     ],
@@ -136,7 +135,7 @@ export default {
                     skill: "CREATE_SCATTER_CHART",
                     success: true,
                     data: {
-                        message: "散点图已生成并保存到 charts/ 目录",
+                        message: "Scatter plot generated and saved to charts/ directory",
                         filePath: result.filePath,
                         filename: result.filename,
                         chartType: "scatter",

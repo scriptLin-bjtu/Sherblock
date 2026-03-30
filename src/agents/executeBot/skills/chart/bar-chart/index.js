@@ -12,7 +12,7 @@ export default {
     name: "CREATE_BAR_CHART",
 
     description:
-        "生成柱状图，用于比较不同类别的数值（如不同地址的交易数量、代币余额等）",
+        "Generate a bar chart for comparing values across different categories (e.g., transaction counts by address, token balances)",
 
     category: "chart",
 
@@ -22,34 +22,34 @@ export default {
     },
 
     whenToUse: [
-        "需要比较不同类别的数值大小",
-        "需要展示多个地址、代币或实体之间的对比",
-        "需要分析交易数量、余额、费用等统计指标的对比",
+        "Need to compare values across different categories",
+        "Need to display comparisons between multiple addresses, tokens, or entities",
+        "Need to analyze comparisons of statistical metrics like transaction counts, balances, fees, etc.",
     ],
 
     examples: [
         {
-            description: "比较不同地址的交易数量",
+            description: "Compare transaction counts of different addresses",
             params: {
-                title: "各地址交易数量统计",
+                title: "Transaction Count Statistics by Address",
                 xAxis: ["0x1234...", "0x5678...", "0xabcd..."],
-                series: [{ name: "交易数", data: [150, 200, 180] }],
-                yAxisName: "交易数量",
+                series: [{ name: "Transactions", data: [150, 200, 180] }],
+                yAxisName: "Transaction Count",
                 filename: "address-tx-counts.svg",
-                description: "三个地址的总交易数量对比",
+                description: "Comparison of total transaction counts for three addresses",
             },
         },
         {
-            description: "比较多个系列的柱状图",
+            description: "Multi-series bar chart comparison",
             params: {
-                title: "代币持有量对比",
+                title: "Token Holdings Comparison",
                 xAxis: ["Alice", "Bob", "Charlie"],
                 series: [
                     { name: "ETH", data: [5.5, 2.3, 10.0] },
-                    { name: "USDC", data: [1000, 500, 2000] },
+                    { name: "USDT", data: [1000, 500, 2000] },
                 ],
-                yAxisName: "数量",
-                description: "三个用户持有的不同代币数量",
+                yAxisName: "Amount",
+                description: "Comparison of different token holdings for three users",
             },
         },
     ],
@@ -95,7 +95,7 @@ export default {
                     skill: "CREATE_BAR_CHART",
                     success: true,
                     data: {
-                        message: "柱状图已生成并保存到 charts/ 目录",
+                        message: "Bar chart generated and saved to charts/ directory",
                         filePath: result.filePath,
                         filename: result.filename,
                         chartType: "bar",
