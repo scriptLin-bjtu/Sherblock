@@ -5,6 +5,7 @@
     "main": "src/index.js",
     "scripts": {
         "start": "node src/index.js",
+        "server": "node src/server-index.js",
         "test": "node src/test.js"
     },
     "keywords": [],
@@ -13,10 +14,14 @@
     "type": "module",
     "dependencies": {
         "canvas": "^3.2.2",
+        "chokidar": "^5.0.0",
         "dotenv": "^17.2.3",
         "ethers": "^5.8.0",
+        "express": "^5.2.1",
         "undici": "^7.22.0",
+        "uuid": "^13.0.0",
         "vega": "^6.2.0",
-        "vega-lite": "^6.4.2"
+        "vega-lite": "^6.4.2",
+        "ws": "^8.20.0"
     }
 }

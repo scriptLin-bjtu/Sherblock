@@ -1,0 +1,8 @@
+[Server] Starting server...
+[HttpServer] HTTP server running on port 3000
+[Server] WebSocket server running on port 8080
+[WorkspaceWatcher] Starting watcher on: D:\project\nodejs-project\sherblock\data
+[Server] Server started successfully
+[Server] HTTP: http://localhost:3000
+[Server] WebSocket: ws://localhost:8080/ws
+[WorkspaceWatcher] Watcher ready

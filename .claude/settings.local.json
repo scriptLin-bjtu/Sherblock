@@ -24,7 +24,9 @@
       "Bash(node -e \":*)",
       "Bash(npm uninstall:*)",
       "Bash(Run Vega chart tests)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(tasklist)",
+      "Bash(curl:*)"
     ]
   }
 }

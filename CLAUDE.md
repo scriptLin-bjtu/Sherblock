@@ -67,11 +67,19 @@ Modular skill system with 30+ skills organized by category. Each skill is a sepa
 
 **Visualization & Reporting Skills:**
 - **Report**: Generate structured markdown analysis reports from workflow context
+- **Chart**: Generate visualization charts (line, bar, pie, scatter, radar) using Vega-Lite and Canvas
+
+**Chart Generation Skills:**
+- `CREATE_LINE_CHART` - Trend visualization (token prices, transaction volumes)
+- `CREATE_BAR_CHART` - Comparison analysis (address metrics, token balances)
+- `CREATE_PIE_CHART` - Proportional data (portfolio distribution, fund flow ratios)
+- `CREATE_SCATTER_CHART` - Correlation analysis (transaction amount vs gas fees)
+- `CREATE_RADAR_CHART` - Multi-dimensional profiling (address activity, risk assessment)
 
 **Skill Registry** (`src/agents/executeBot/skills/index.js`): Dynamically loads skills from filesystem with:
 - `SkillLoader`: Discovers and caches skills (caching improves performance)
-- `SkillRegistry`: Manages loaded skills, validates parameters, resolves aliases
-- `Skill Aliases`: Handles common LLM naming variations (e.g., `GET_NORMAL_TRANSACTIONS` → `GET_TRANSACTIONS`)
+- `SkillRegistry`: Manages loaded skills, validates parameters, resolves skill names
+- `Skill Resolution`: Exact match only (no aliases - LLM must use correct skill names)
 
 Each skill exports `default` object with:
 - `name`, `description`, `category`, `params` (required/optional)
@@ -85,6 +93,10 @@ Each skill exports `default` object with:
   - `normalizeParams()` - Parameter name normalization for LLM mistakes
   - `compressResponse()` - Response compression for context management
   - `summarizeTransactions()` - Transaction list summarization
+- `chart-generator.js` - Chart generation using Vega-Lite and Canvas:
+  - `generateChart()` - Main entry point for chart generation
+  - `createLineChartSpec()`, `createBarChartSpec()`, etc. - Chart spec creators
+  - `specToSvg()` - Convert Vega-Lite spec to SVG
 - `config.js` - Configuration constants including supported chains
 - `proxy-agent.js` - Proxy configuration for HTTP requests
 
@@ -129,6 +141,9 @@ Key dependencies:
 - `undici` - HTTP/1.1 client for making requests (includes ProxyAgent support)
 - `dotenv` - Environment variable management
 - `ethers` - Ethereum utilities (devDependency, currently v5.8.0 installed)
+- `canvas` - Canvas implementation for Node.js (chart rendering)
+- `vega` - Visualization grammar for chart generation
+- `vega-lite` - High-level declarative format for visualizations
 
 ## Development Commands
 
@@ -216,7 +231,8 @@ src/
 5. **Report Generation**: `GENERATE_MARKDOWN_REPORT` skill:
    - Generates structured markdown reports from workflow context
    - Saves to workspace's `reports/` directory
-   - Report sections: Summary, Goals, Key Findings, Detailed Data
+   - Report sections: Summary, Goals, Key Findings, Detailed Data, Visualization Charts
+   - Automatically embeds all SVG charts from `charts/` directory
    - Filename format: `report-YYYYMMDD-HHmmss.md` or custom filename
 
 6. **LLM Provider Differences**: The `callLLM` function handles provider-specific formats:
