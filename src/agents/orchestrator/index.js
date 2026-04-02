@@ -10,6 +10,8 @@ import { PlanAgent } from "../planBot/agent.js";
 import { ExecuteAgentV2 } from "../executeBot/agent-v2.js";
 import { scopeManager } from "../../utils/scope-manager.js";
 import { workspaceManager } from "../../utils/workspace-manager.js";
+import { validateDAG, inferEdges, inferEdgesFromOutputs } from "../../utils/dag-utils.js";
+import { ParallelExecutionEngine } from "./parallel-executor.js";
 
 export { WorkflowStage } from "./state-machine.js";
 
@@ -17,6 +19,14 @@ export class AgentOrchestrator {
     constructor(callLLM, options = {}) {
         this.callLLM = callLLM;
         this._options = options;
+
+        // 并行执行配置
+        this.config = {
+            useParallelExecution: options.useParallelExecution || process.env.USE_PARALLEL_EXECUTION === 'true',
+            maxParallelTasks: options.maxParallelTasks || parseInt(process.env.MAX_PARALLEL_TASKS, 10) || 3,
+            continueOnFailure: options.continueOnFailure ?? process.env.CONTINUE_ON_FAILURE === 'true' ?? false,
+            enableReview: options.enableReview ?? process.env.ENABLE_REVIEW_IN_PARALLEL === 'true',
+        };
 
         // Initialize scope manager
         this.scopeManager = scopeManager;
@@ -170,8 +180,18 @@ export class AgentOrchestrator {
             // Write updated scope to file
             await this.scopeManager.write(this.workflowState.scope);
 
-            // Phase 3: Execute with review
-            const result = await this._executeWithReview();
+            // Phase 3: Execute plan (serial or parallel based on config)
+            let result;
+            if (this.config.useParallelExecution) {
+                // 转换为执行阶段
+                await this.stateMachine.transition(WorkflowStage.EXECUTING, {
+                    plan: this.workflowState.plan,
+                    scope: this.workflowState.scope,
+                });
+                result = await this._executeWithDAG();
+            } else {
+                result = await this._executeWithReview();
+            }
 
             // Complete workflow - only transition in appropriate states
             const currentState = this.stateMachine.getState();
@@ -179,18 +199,42 @@ export class AgentOrchestrator {
                 currentState === WorkflowStage.EXECUTING ||
                 currentState === WorkflowStage.REVIEWING
             ) {
+                // 检查是否使用了并行执行模式，以及是否还有剩余步骤
+                const isParallelMode = this.config.useParallelExecution;
+                const plan = this.workflowState.plan;
+                const remainingSteps = plan?.steps?.filter(s => !s.removed) || [];
+
+                // 并行模式且所有步骤已完成时，直接转换到 COMPLETED
+                // 串行模式或仍有剩余步骤时，需要经过 REVIEWING
+                const needsReview = !isParallelMode || remainingSteps.length > 0;
+
+                if (currentState === WorkflowStage.EXECUTING && needsReview) {
+                    // 串行执行模式或有剩余步骤，需要先转换到 REVIEWING 状态
+                    await this.stateMachine.transition(WorkflowStage.REVIEWING, {
+                        plan: this.workflowState.plan,
+                        scope: this.workflowState.scope,
+                        currentStepIndex: this.workflowState.currentStepIndex,
+                        stepResult: {}, // 串行模式下需要 stepResult
+                    });
+                }
+                // 然后转换到 COMPLETED
+                // 并行模式：currentStepIndex 始终为 0，需要传递一个足够大的值让守卫通过
+                const completedStepIndex = isParallelMode
+                    ? (this.workflowState.plan?.steps?.length || 0)
+                    : this.workflowState.currentStepIndex;
                 await this.stateMachine.transition(WorkflowStage.COMPLETED, {
                     plan: this.workflowState.plan,
                     scope: this.workflowState.scope,
-                    currentStepIndex: this.workflowState.currentStepIndex,
+                    currentStepIndex: completedStepIndex,
                 });
             } else if (currentState === WorkflowStage.PLANNING) {
                 // If in PLANNING state (due to review modifying plan), transition directly to COMPLETED
                 // All steps are completed, just the state is in PLANNING
+                // 使用计划步骤总数作为 currentStepIndex
                 await this.stateMachine.transition(WorkflowStage.COMPLETED, {
                     plan: this.workflowState.plan,
                     scope: this.workflowState.scope,
-                    currentStepIndex: this.workflowState.currentStepIndex,
+                    currentStepIndex: this.workflowState.plan?.steps?.length || 0,
                 });
             }
 
@@ -281,7 +325,11 @@ export class AgentOrchestrator {
                 "[Orchestrator] Generated capability summary for planning",
             );
 
-            const plan = await this.planAgent.makePlan(infos, capabilitiesDoc);
+            // Determine execution mode based on config
+            const executionMode = this.config.useParallelExecution ? 'parallel' : 'serial';
+            console.log(`[Orchestrator] Using ${executionMode} execution mode for planning`);
+
+            const plan = await this.planAgent.makePlan(infos, capabilitiesDoc, executionMode);
 
             this._emit("planning:completed", { plan });
             return plan;
@@ -397,6 +445,227 @@ export class AgentOrchestrator {
 
         this._emit("execution:completed", { results });
         return { results, history: this.workflowState.executionHistory };
+    }
+
+    /**
+     * Phase 3: Execute plan using DAG-based parallel execution
+     * @private
+     */
+    async _executeWithDAG() {
+        this._emit("execution:started", {
+            totalSteps: this.workflowState.plan.steps?.length || 0,
+            mode: 'parallel',
+        });
+
+        console.log('[Orchestrator] Using DAG-based parallel execution');
+        console.log(`[Orchestrator] Max parallel tasks: ${this.config.maxParallelTasks}`);
+
+        // 是否启用审查模式（可通过配置或环境变量控制）
+        const enableReview = this.config.enableReview ||
+            process.env.ENABLE_REVIEW_IN_PARALLEL === 'true';
+
+        // 构建并验证 DAG
+        const nodes = {};
+        const steps = this.workflowState.plan.steps || [];
+
+        for (let i = 0; i < steps.length; i++) {
+            const step = steps[i];
+            if (step.removed) continue;
+
+            // 生成或使用 step_id
+            const nodeId = step.step_id || `step_${i}`;
+
+            nodes[nodeId] = {
+                step_id: nodeId,
+                goal: step.goal,
+                rationale: step.rationale,
+                constraints: step.constraints,
+                depends_on: step.depends_on || [],
+                outputs: step.outputs || [],
+                index: i,
+            };
+        }
+
+        // 推断边（如果依赖没有显式声明）
+        const explicitEdges = inferEdges(nodes);
+        const inferredEdges = inferEdgesFromOutputs(nodes);
+        const edges = [...explicitEdges, ...inferredEdges.filter(e =>
+            !explicitEdges.some(ee => ee.from === e.from && ee.to === e.to)
+        )];
+
+        // 验证 DAG
+        const validation = validateDAG(nodes, edges);
+        if (!validation.valid) {
+            throw new Error(`DAG validation failed: ${validation.error}`);
+        }
+
+        console.log(`[Orchestrator] DAG validated: ${Object.keys(nodes).length} nodes, ${edges.length} edges`);
+
+        // 创建并行执行引擎
+        const executor = new ParallelExecutionEngine(
+            { ...this.workflowState.plan, nodes, edges },
+            this.executeAgent,
+            this.scopeManager,
+            {
+                maxParallel: this.config.maxParallelTasks,
+                continueOnFailure: this.config.continueOnFailure,
+                // 审查配置
+                enableReview,
+                planAgent: enableReview ? this.planAgent : null,
+                onStepStart: (nodeId, node) => {
+                    this._emit("step:started", { stepIndex: node.index, step: node, nodeId });
+                },
+                onStepComplete: (nodeId, result) => {
+                    this._emit("step:completed", { stepIndex: nodes[nodeId].index, result, nodeId });
+                },
+                onStepError: (nodeId, error) => {
+                    this._emit("step:error", { stepIndex: nodes[nodeId].index, error, nodeId });
+                },
+                onBatchComplete: (nodeIds) => {
+                    console.log(`[Orchestrator] Batch completed: ${nodeIds.join(', ')}`);
+                },
+            }
+        );
+
+        // 支持审查后的 DAG 重建循环
+        let currentNodes = nodes;
+        let currentEdges = edges;
+        let currentExecutor = executor;
+        let maxRebuilds = 5; // 防止无限循环
+        let rebuildCount = 0;
+
+        while (rebuildCount <= maxRebuilds) {
+            try {
+                // 执行
+                const executionResult = await currentExecutor.execute();
+
+                // 检查是否需要重建 DAG
+                if (executionResult.needsDAGRebuild) {
+                    rebuildCount++;
+                    console.log(`[Orchestrator] Rebuilding DAG (${rebuildCount}/${maxRebuilds})`);
+
+                    const reviewResult = executionResult.rebuildReason;
+
+                    // 处理审查决策
+                    if (reviewResult.decision === 'MODIFY_PLAN' && reviewResult.adjustments) {
+                        this.workflowState.plan = this.planAgent.adjustPlan(
+                            this.workflowState.plan,
+                            reviewResult.adjustments,
+                        );
+                        console.log('[Orchestrator] Plan adjusted based on review');
+                    } else if (reviewResult.decision === 'REORDER' && reviewResult.adjustments) {
+                        const reorderAdjustment = reviewResult.adjustments.find(
+                            (a) => a.type === "reorder",
+                        );
+                        if (reorderAdjustment && reorderAdjustment.newOrder) {
+                            this.workflowState.plan = this.planAgent.reorderRemainingSteps(
+                                this.workflowState.plan,
+                                reorderAdjustment.newOrder,
+                                0,
+                            );
+                            console.log('[Orchestrator] Steps reordered based on review');
+                        }
+                    }
+
+                    // 重建 DAG
+                    const newNodes = {};
+                    const newSteps = this.workflowState.plan.steps || [];
+
+                    for (let i = 0; i < newSteps.length; i++) {
+                        const step = newSteps[i];
+                        if (step.removed) continue;
+
+                        const nodeId = step.step_id || `step_${i}`;
+                        newNodes[nodeId] = {
+                            step_id: nodeId,
+                            goal: step.goal,
+                            rationale: step.rationale,
+                            constraints: step.constraints,
+                            depends_on: step.depends_on || [],
+                            outputs: step.outputs || [],
+                            index: i,
+                        };
+                    }
+
+                    const newExplicitEdges = inferEdges(newNodes);
+                    const newInferredEdges = inferEdgesFromOutputs(newNodes);
+                    currentNodes = newNodes;
+                    currentEdges = [...newExplicitEdges, ...newInferredEdges.filter(e =>
+                        !newExplicitEdges.some(ee => ee.from === e.from && ee.to === e.to)
+                    )];
+
+                    // 验证新 DAG
+                    const newValidation = validateDAG(currentNodes, currentEdges);
+                    if (!newValidation.valid) {
+                        throw new Error(`Rebuilt DAG validation failed: ${newValidation.error}`);
+                    }
+
+                    // 创建新的执行器
+                    currentExecutor = new ParallelExecutionEngine(
+                        { ...this.workflowState.plan, nodes: currentNodes, edges: currentEdges },
+                        this.executeAgent,
+                        this.scopeManager,
+                        {
+                            maxParallel: this.config.maxParallelTasks,
+                            continueOnFailure: this.config.continueOnFailure,
+                            enableReview,
+                            planAgent: enableReview ? this.planAgent : null,
+                            onStepStart: (nodeId, node) => {
+                                this._emit("step:started", { stepIndex: node.index, step: node, nodeId });
+                            },
+                            onStepComplete: (nodeId, result) => {
+                                this._emit("step:completed", { stepIndex: currentNodes[nodeId].index, result, nodeId });
+                            },
+                            onStepError: (nodeId, error) => {
+                                this._emit("step:error", { stepIndex: currentNodes[nodeId].index, error, nodeId });
+                            },
+                            onBatchComplete: (nodeIds) => {
+                                console.log(`[Orchestrator] Batch completed: ${nodeIds.join(', ')}`);
+                            },
+                        }
+                    );
+
+                    // 继续执行（保留已完成的结果）
+                    currentExecutor.results = executionResult.results.filter(r => !r.needsDAGRebuild);
+                    continue;
+                }
+
+                // 正常完成，更新 scope
+                if (executionResult.scope) {
+                    this.workflowState.scope = {
+                        ...this.workflowState.scope,
+                        ...executionResult.scope,
+                    };
+                }
+
+                // 记录执行历史
+                for (const r of executionResult.results) {
+                    this.workflowState.executionHistory.push({
+                        stepIndex: currentNodes[r.nodeId]?.index ?? 0,
+                        step: currentNodes[r.nodeId] || r.step,
+                        result: r.result,
+                        timestamp: Date.now(),
+                    });
+                }
+
+                this._emit("execution:completed", {
+                    results: executionResult.results,
+                    stats: executionResult.stats,
+                });
+
+                return {
+                    results: executionResult.results,
+                    history: this.workflowState.executionHistory,
+                    stats: executionResult.stats,
+                };
+            } catch (error) {
+                this._emit("execution:error", { error: error.message });
+                throw error;
+            }
+        }
+
+        // 超过最大重建次数
+        throw new Error(`Max DAG rebuilds (${maxRebuilds}) exceeded`);
     }
 
     /**

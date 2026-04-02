@@ -1,4 +1,174 @@
-import { prompt } from "./prompt.js";
+import { prompt as promptSerial } from "./prompt-serial.js";
+import { prompt as promptParallel } from "./prompt-parallel.js";
+
+/**
+ * 根据执行模式获取对应的 prompt 函数
+ * @param {string} executionMode - 'serial' 或 'parallel'
+ * @returns {Function} prompt 函数
+ */
+function getPromptForMode(executionMode) {
+    return executionMode === 'parallel' ? promptParallel : promptSerial;
+}
+
+/**
+ * 尝试修复截断的 JSON
+ * @param {string} jsonStr - 可能截断的 JSON 字符串
+ * @returns {Object|null} 修复后的对象，或 null 如果修复失败
+ */
+function tryFixTruncatedJSON(jsonStr) {
+    if (!jsonStr || typeof jsonStr !== 'string') return null;
+
+    // 尝试直接解析
+    try {
+        return JSON.parse(jsonStr);
+    } catch (e) {
+        // 继续尝试修复
+    }
+
+    // 尝试 1: 补全截断的数组/对象
+    try {
+        let fixed = jsonStr;
+        // 补全缺失的引号
+        const openBraces = (fixed.match(/{/g) || []).length;
+        const closeBraces = (fixed.match(/}/g) || []).length;
+        const openBrackets = (fixed.match(/\[/g) || []).length;
+        const closeBrackets = (fixed.match(/\]/g) || []).length;
+
+        // 补全花括号
+        while (openBraces > closeBraces) {
+            fixed += '}';
+            closeBraces++;
+        }
+        // 补全方括号
+        while (openBrackets > closeBrackets) {
+            fixed += ']';
+            closeBrackets++;
+        }
+
+        return JSON.parse(fixed);
+    } catch (e) {
+        // 继续尝试
+    }
+
+    // 尝试 2: 查找最后一个完整的 JSON 对象
+    try {
+        const match = jsonStr.match(/\{[\s\S]*\}$/);
+        if (match) {
+            return JSON.parse(match[0]);
+        }
+    } catch (e) {
+        // 继续尝试
+    }
+
+    return null;
+}
+
+/**
+ * 解析计划响应，支持新旧格式
+ * @param {Object} response - LLM响应
+ * @returns {Object} 解析后的计划对象
+ */
+function parsePlanResponse(response) {
+    let data = response.data || response;
+
+    // 处理 content 字段（LLM 返回的 JSON 字符串）
+    if (data.content && typeof data.content === 'string') {
+        let parsedContent = null;
+        let parseError = null;
+
+        // 第一次尝试：直接解析
+        try {
+            parsedContent = JSON.parse(data.content);
+        } catch (e) {
+            parseError = e.message;
+            // 第二次尝试：修复截断的 JSON
+            parsedContent = tryFixTruncatedJSON(data.content);
+        }
+
+        if (parsedContent) {
+            // 将解析后的内容与原始数据合并，解析的内容优先
+            data = { ...data, ...parsedContent };
+        } else {
+            console.error('[PlanAgent] Failed to parse content JSON:', parseError);
+            // 如果解析失败，尝试直接使用 content 字符串
+            return {
+                content: data.content,
+                usage: data.usage
+            };
+        }
+    }
+
+    // 兼容旧格式（steps 数组）
+    if (data.steps && !data.nodes) {
+        return convertLegacyFormat(data);
+    }
+
+    // 新格式：nodes 对象
+    // 添加默认 step_id 生成
+    if (data.nodes) {
+        const nodes = {};
+        const steps = [];
+        let stepIndex = 1;
+
+        for (const [key, node] of Object.entries(data.nodes)) {
+            const stepId = node.step_id || key || `step_${stepIndex}`;
+            const processedNode = {
+                ...node,
+                step_id: stepId,
+                outputs: node.outputs || [],
+                depends_on: node.depends_on || []
+            };
+            nodes[stepId] = processedNode;
+            steps.push(processedNode);
+            stepIndex++;
+        }
+
+        return {
+            scope: data.scope,
+            steps,  // 保留 steps 数组以兼容状态机检查
+            nodes,
+            edges: data.edges || []
+        };
+    }
+
+    // 兜底：返回原始数据
+    return data;
+}
+
+/**
+ * 将旧格式（steps数组）转换为新格式（图结构）
+ * @param {Object} legacyPlan - 旧格式计划
+ * @returns {Object} 新格式计划
+ */
+function convertLegacyFormat(legacyPlan) {
+    const nodes = {};
+    const edges = [];
+
+    legacyPlan.steps.forEach((step, index) => {
+        const stepId = step.step_id || `step_${index + 1}`;
+        nodes[stepId] = {
+            ...step,
+            id: stepId,
+            step_id: stepId,
+            outputs: step.outputs || [],
+            depends_on: step.depends_on || []
+        };
+
+        // 从 depends_on 构建 edges
+        if (step.depends_on && Array.isArray(step.depends_on)) {
+            step.depends_on.forEach(dep => {
+                edges.push({ from: dep, to: stepId });
+            });
+        }
+    });
+
+    return {
+        scope: legacyPlan.scope,
+        steps: legacyPlan.steps,  // 保留 steps 数组以兼容状态机检查
+        nodes,
+        edges
+    };
+}
 
 /**
  * Review prompt for step execution review
@@ -42,9 +212,18 @@ export class PlanAgent {
         this.plan = null;
     }
 
-    async makePlan(infos, capabilitiesDoc = null) {
+    /**
+     * 创建执行计划
+     * @param {Object} infos - 用户输入信息
+     * @param {string|null} capabilitiesDoc - 技能能力描述
+     * @param {string} executionMode - 执行模式：'serial' 或 'parallel'（默认 'serial'）
+     * @returns {Promise<Object>} 计划对象
+     */
+    async makePlan(infos, capabilitiesDoc = null, executionMode = 'serial') {
+        const promptFn = getPromptForMode(executionMode);
+
         const res = await this.callLLM({
-            systemPrompt: prompt(capabilitiesDoc),
+            systemPrompt: promptFn(capabilitiesDoc),
             apiKey: process.env.DEEPSEEK_API_KEY,
             user_messages: `请根据已知信息生成分析计划：${JSON.stringify(
                 infos,
@@ -53,15 +232,12 @@ export class PlanAgent {
             )}`,
             modelProvider: "deepseek-reasoner",
             options: {
-                max_tokens: 4000,
+                max_tokens: 32000,
             },
         });
 
-        // 提取解析后的数据
-        const data = res.data || res;
-
-        // 如果返回的是数组，直接使用；否则尝试获取 plan 字段
-        this.plan = Array.isArray(data) ? data : data.plan || data;
+        // 使用新的解析函数，支持新旧格式
+        this.plan = parsePlanResponse(res);
 
         console.log("计划模块生成的计划:", JSON.stringify(this.plan, null, 2));
         return this.plan;

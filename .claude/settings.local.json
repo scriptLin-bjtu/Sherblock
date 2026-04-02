@@ -1,32 +1,33 @@
 {
-  "permissions": {
-    "allow": [
-      "WebSearch",
-      "Bash(node:*)",
-      "Bash(npm --version:*)",
-      "Bash(openspec new:*)",
-      "Bash(openspec status:*)",
-      "Bash(openspec instructions:*)",
-      "WebFetch(domain:docs.etherscan.io)",
-      "Bash(grep:*)",
-      "Bash(done:*)",
-      "Bash(openspec list:*)",
-      "Bash(npm start)",
-      "Bash(cd:*)",
-      "WebFetch(domain:echarts.apache.org)",
-      "WebFetch(domain:github.com)",
-      "Bash(npm install:*)",
-      "Bash(ls:*)",
-      "Bash(npm run:*)",
-      "Bash(npm test:*)",
-      "Bash(find:*)",
-      "Bash(npm list:*)",
-      "Bash(node -e \":*)",
-      "Bash(npm uninstall:*)",
-      "Bash(Run Vega chart tests)",
-      "Bash(taskkill:*)",
-      "Bash(tasklist)",
-      "Bash(curl:*)"
-    ]
-  }
+    "permissions": {
+        "allow": [
+            "WebSearch",
+            "Bash(node:*)",
+            "Bash(npm --version:*)",
+            "Bash(openspec new:*)",
+            "Bash(openspec status:*)",
+            "Bash(openspec instructions:*)",
+            "WebFetch(domain:docs.etherscan.io)",
+            "Bash(grep:*)",
+            "Bash(done:*)",
+            "Bash(openspec list:*)",
+            "Bash(npm start)",
+            "Bash(cd:*)",
+            "WebFetch(domain:echarts.apache.org)",
+            "WebFetch(domain:github.com)",
+            "Bash(npm install:*)",
+            "Bash(ls:*)",
+            "Bash(npm run:*)",
+            "Bash(npm test:*)",
+            "Bash(find:*)",
+            "Bash(npm list:*)",
+            "Bash(node -e \":*)",
+            "Bash(npm uninstall:*)",
+            "Bash(Run Vega chart tests)",
+            "Bash(taskkill:*)",
+            "Bash(tasklist)",
+            "Bash(curl:*)",
+            "Bash(npx vitest:*)"
+        ]
+    }
 }
