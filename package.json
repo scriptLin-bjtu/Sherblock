@@ -5,7 +5,10 @@
     "main": "src/index.js",
     "scripts": {
         "start": "node src/index.js",
-        "test": "node src/test.js"
+        "test": "node src/test.js",
+        "test:unit": "vitest run",
+        "test:watch": "vitest",
+        "test:coverage": "vitest run --coverage"
     },
     "keywords": [],
     "author": "",
@@ -15,8 +18,12 @@
         "canvas": "^3.2.2",
         "dotenv": "^17.2.3",
         "ethers": "^5.8.0",
+        "p-limit": "^7.3.0",
         "undici": "^7.22.0",
         "vega": "^6.2.0",
         "vega-lite": "^6.4.2"
+    },
+    "devDependencies": {
+        "vitest": "^4.1.2"
     }
 }
