@@ -61,6 +61,12 @@ export default class MessageHandler {
                 case 'GET_REPORTS':
                     return await this.handleGetReports(message);
 
+                case 'GET_REPORT_CONTENT':
+                    return await this.handleGetReportContent(message);
+
+                case 'GET_LOG_CONTENT':
+                    return await this.handleGetLogContent(message);
+
                 default:
                     throw new Error(`Unknown message type: ${type}`);
             }
@@ -179,19 +185,17 @@ export default class MessageHandler {
     async handleCreateWorkspace(message, ws, clientId) {
         const { title } = message.payload || {};
 
-        // 创建工作区
+        // 重置工作区状态并创建新工作区
+        await workspaceManager.reset();
         await workspaceManager.initialize();
-        const workspace = workspaceManager.getCurrentWorkspace();
-
-        const workspaceId = workspace.id;
+        const workspaceId = workspaceManager.getWorkspaceId();
 
         // 订阅该工作区
         this.wsServer.subscribeToWorkspace(clientId, workspaceId);
 
         // 广播工作区列表更新
-        this.wsServer.broadcast('WORKSPACES_LIST', {
-            workspaces: await this.listWorkspaces()
-        });
+        const workspaces = await this.listWorkspaces();
+        this.wsServer.broadcast('WORKSPACES_LIST', { workspaces });
 
         return {
             id: message.id,
@@ -406,6 +410,48 @@ export default class MessageHandler {
         };
     }
 
+    /**
+     * 获取报告内容
+     */
+    async handleGetReportContent(message) {
+        const { workspaceId, reportName } = message.payload;
+        const workspacePath = join(process.cwd(), 'data', workspaceId);
+        const reportPath = join(workspacePath, 'reports', reportName);
+
+        try {
+            const content = await readFile(reportPath, 'utf-8');
+            return {
+                id: message.id,
+                type: 'REPORT_CONTENT',
+                timestamp: Date.now(),
+                payload: { workspaceId, reportName, content }
+            };
+        } catch (error) {
+            throw new Error(`Failed to read report: ${error.message}`);
+        }
+    }
+
+    /**
+     * 获取日志内容
+     */
+    async handleGetLogContent(message) {
+        const { workspaceId, logName } = message.payload;
+        const workspacePath = join(process.cwd(), 'data', workspaceId);
+        const logPath = join(workspacePath, 'logs', logName);
+
+        try {
+            const content = await readFile(logPath, 'utf-8');
+            return {
+                id: message.id,
+                type: 'LOG_CONTENT',
+                timestamp: Date.now(),
+                payload: { workspaceId, logName, content }
+            };
+        } catch (error) {
+            throw new Error(`Failed to read log: ${error.message}`);
+        }
+    }
+
     // ============ 辅助方法 ============
 
     /**
@@ -442,29 +488,36 @@ export default class MessageHandler {
      * 获取工作区信息
      */
     async getWorkspaceInfo(workspacePath, workspaceId) {
+        let stats;
         try {
-            const stats = await stat(workspacePath);
-            const scope = await this.readScope(workspacePath);
-
-            const hasCharts = await this.hasFiles(workspacePath, 'charts');
-            const hasReports = await this.hasFiles(workspacePath, 'reports');
-            const hasLogs = await this.hasFiles(workspacePath, 'logs');
-
-            return {
-                workspaceId,
-                createdAt: stats.birthtime.getTime(),
-                title: scope?.basic_infos?.user_questions?.[0] ||
-                    scope?.basic_infos?.goal ||
-                    workspaceId,
-                hasCharts,
-                hasReports,
-                hasLogs,
-                scope
-            };
+            stats = await stat(workspacePath);
         } catch (error) {
-            console.error(`[MessageHandler] Error getting workspace info:`, error);
+            console.error(`[MessageHandler] Error getting workspace stats:`, error);
             return null;
         }
+
+        let scope = null;
+        try {
+            scope = await this.readScope(workspacePath);
+        } catch (error) {
+            // scope.json 可能不存在或读取失败，不影响工作区显示
+        }
+
+        const hasCharts = await this.hasFiles(workspacePath, 'charts');
+        const hasReports = await this.hasFiles(workspacePath, 'reports');
+        const hasLogs = await this.hasFiles(workspacePath, 'logs');
+
+        return {
+            workspaceId,
+            createdAt: stats.birthtime.getTime(),
+            title: scope?.basic_infos?.user_questions?.[0] ||
+                scope?.basic_infos?.goal ||
+                workspaceId,
+            hasCharts,
+            hasReports,
+            hasLogs,
+            scope
+        };
     }
 
     /**

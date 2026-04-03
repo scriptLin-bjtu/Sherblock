@@ -56,6 +56,19 @@ src/
 | `ERROR` | Server→Client | 错误消息 | `{ workspaceId, error }` |
 | `FILE_CHANGED` | Server→Client | 文件变化通知 | `{ workspaceId, fileType, filename }` |
 
+### 并行执行消息类型
+
+| 消息类型 | 方向 | 说明 | Payload |
+|---------|------|------|---------|
+| `SET_EXECUTION_MODE` | Client→Server | 设置执行模式 | `{ workspaceId, mode: 'serial' \| 'parallel', maxParallel?: number }` |
+| `EXECUTION_MODE_SET` | Server→Client | 执行模式设置确认 | `{ workspaceId, mode, maxParallel }` |
+| `EXECUTION_MODE_CHANGED` | Server→Client | 执行模式变更通知 | `{ workspaceId, mode, maxParallel }` |
+| `STEPS_STATUS` | Server→Client | 步骤状态列表 | `{ workspaceId, steps: [{ stepIndex, status, description, dependsOn: [] }] }` |
+| `PARALLEL_STEP_STARTED` | Server→Client | 并行步骤开始 | `{ workspaceId, stepIndex, description, parallelGroup: string }` |
+| `PARALLEL_STEP_COMPLETED` | Server→Client | 并行步骤完成 | `{ workspaceId, stepIndex, status: 'completed' \| 'failed', result?: any }` |
+| `SCOPE_LOCK_ACQUIRED` | Server→Client | Scope锁获取 | `{ workspaceId, stepIndex, locked: boolean }` |
+| `SCOPE_LOCK_RELEASED` | Server→Client | Scope锁释放 | `{ workspaceId, stepIndex }` |
+
 ## 核心代码设计
 
 ### WebSocket服务器 (`src/server/websocket-server.js`)
@@ -138,6 +151,8 @@ export default class MessageHandler {
         return await this.handleDeleteWorkspace(message);
       case 'START_ANALYSIS':
         return await this.handleStartAnalysis(message, ws);
+      case 'SET_EXECUTION_MODE':
+        return await this.handleSetExecutionMode(message, ws);
       default:
         throw new Error(`Unknown message type: ${message.type}`);
     }
@@ -217,10 +232,13 @@ export default class MessageHandler {
   }
 
   async handleStartAnalysis(message, ws) {
-    const { workspaceId, input } = message.payload;
+    const { workspaceId, input, mode, maxParallel } = message.payload;
 
     // 创建Orchestrator适配器
-    const adapter = new OrchestratorAdapter(ws, workspaceId);
+    const adapter = new OrchestratorAdapter(ws, workspaceId, {
+      mode: mode || 'serial',
+      maxParallel: maxParallel || 3
+    });
     this.activeWorkflows.set(workspaceId, adapter);
 
     // 异步启动分析
@@ -235,7 +253,34 @@ export default class MessageHandler {
       id: message.id,
       type: 'ANALYSIS_STARTED',
       timestamp: Date.now(),
-      payload: { workspaceId }
+      payload: { workspaceId, mode: mode || 'serial' }
+    };
+  }
+
+  async handleSetExecutionMode(message, ws) {
+    const { workspaceId, mode, maxParallel } = message.payload;
+
+    // 如果工作区已有活动workflow，更新其执行模式
+    const adapter = this.activeWorkflows.get(workspaceId);
+    if (adapter) {
+      adapter.setExecutionMode(mode, maxParallel);
+    }
+
+    // 存储执行模式配置
+    this.executionModes = this.executionModes || new Map();
+    this.executionModes.set(workspaceId, { mode, maxParallel: maxParallel || 3 });
+
+    // 广播执行模式变更
+    ws.send(JSON.stringify({
+      type: 'EXECUTION_MODE_CHANGED',
+      payload: { workspaceId, mode, maxParallel: maxParallel || 3 }
+    }));
+
+    return {
+      id: message.id,
+      type: 'EXECUTION_MODE_SET',
+      timestamp: Date.now(),
+      payload: { workspaceId, mode, maxParallel: maxParallel || 3 }
     };
   }
 
@@ -252,14 +297,24 @@ import { callLLM } from '../services/agent.js';
 import workspaceManager from '../utils/workspace-manager.js';
 
 export class OrchestratorAdapter {
-  constructor(ws, workspaceId) {
+  constructor(ws, workspaceId, options = {}) {
     this.ws = ws;
     this.workspaceId = workspaceId;
+    this.mode = options.mode || 'serial';
+    this.maxParallel = options.maxParallel || 3;
     this.orchestrator = new AgentOrchestrator(callLLM, {
       // 使用WebSocket作为输入输出
       askUser: this.askUser.bind(this)
     });
     this.setupEventListeners();
+  }
+
+  setExecutionMode(mode, maxParallel) {
+    this.mode = mode;
+    this.maxParallel = maxParallel || 3;
+    if (this.orchestrator.setExecutionMode) {
+      this.orchestrator.setExecutionMode(mode, maxParallel);
+    }
   }
 
   setupEventListeners() {
@@ -304,6 +359,47 @@ export class OrchestratorAdapter {
         workspaceId: this.workspaceId,
         agent: 'QuestionAgent',
         message: data.question
+      });
+    });
+
+    // 并行执行事件
+    this.orchestrator.on('steps:status', (data) => {
+      this.send('STEPS_STATUS', {
+        workspaceId: this.workspaceId,
+        steps: data.steps
+      });
+    });
+
+    this.orchestrator.on('step:parallel:started', (data) => {
+      this.send('PARALLEL_STEP_STARTED', {
+        workspaceId: this.workspaceId,
+        stepIndex: data.stepIndex,
+        description: data.step?.description || '',
+        parallelGroup: data.parallelGroup || 'default'
+      });
+    });
+
+    this.orchestrator.on('step:parallel:completed', (data) => {
+      this.send('PARALLEL_STEP_COMPLETED', {
+        workspaceId: this.workspaceId,
+        stepIndex: data.stepIndex,
+        status: data.status,
+        result: data.result
+      });
+    });
+
+    this.orchestrator.on('scope:lock:acquired', (data) => {
+      this.send('SCOPE_LOCK_ACQUIRED', {
+        workspaceId: this.workspaceId,
+        stepIndex: data.stepIndex,
+        locked: true
+      });
+    });
+
+    this.orchestrator.on('scope:lock:released', (data) => {
+      this.send('SCOPE_LOCK_RELEASED', {
+        workspaceId: this.workspaceId,
+        stepIndex: data.stepIndex
       });
     });
   }

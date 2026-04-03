@@ -43,6 +43,7 @@
 - **文件监听**：`chokidar`（监听data目录变化）
 - **HTTP服务器**：`express`（提供静态文件服务）
 - **现有技术**：保持现有的Agent系统不变
+- **并行执行**：支持串行/并行模式切换，EventEmitter事件驱动
 
 ### 前端
 - **语言**：原生 JavaScript (ES6+)
@@ -51,3 +52,5 @@
 - **WebSocket客户端**：原生WebSocket API
 - **Markdown渲染**：`marked` 库
 - **图表显示**：直接嵌入SVG
+- **执行模式选择**：支持串行/并行模式切换UI
+- **并行状态显示**：实时显示多个ExecuteAgent的工作状态

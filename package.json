@@ -5,6 +5,9 @@
     "main": "src/index.js",
     "scripts": {
         "start": "node src/index.js",
+        "server": "node src/server-index.js",
+        "dev": "concurrently \"npm run server\" \"npm run dev:frontend\"",
+        "dev:frontend": "cd frontend && npm run dev",
         "test": "node src/test.js",
         "test:unit": "vitest run",
         "test:watch": "vitest",
@@ -28,6 +31,7 @@
         "vega-lite": "^6.4.2"
     },
     "devDependencies": {
+        "concurrently": "^9.1.2",
         "vitest": "^4.1.2"
     }
 }

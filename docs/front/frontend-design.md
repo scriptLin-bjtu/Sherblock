@@ -28,6 +28,10 @@ frontend/
 │   │   ├── websocket.js       # WebSocket服务
 │   │   ├── api.js            # HTTP API服务
 │   │   └── state.js          # 应用状态管理
+│   ├── execution/            # 执行模式相关
+│   │   ├── mode-selector.js  # 执行模式选择器
+│   │   ├── dag-viewer.js     # DAG可视化组件
+│   │   └── parallel-status.js # 并行任务状态显示
 │   ├── utils/                # 工具函数
 │   │   ├── dom.js            # DOM操作工具
 │   │   ├── format.js         # 格式化工具
@@ -109,6 +113,33 @@ frontend/
 /**
  * 工作流阶段
  * @typedef {'idle'|'collecting'|'planning'|'executing'|'reviewing'|'completed'} WorkflowStage
+ */
+
+/**
+ * 执行模式
+ * @typedef {'serial'|'parallel'} ExecutionMode
+ */
+
+/**
+ * 步骤状态
+ * @typedef {'pending'|'running'|'completed'|'failed'|'waiting'} StepStatus
+ */
+
+/**
+ * 步骤信息（用于并行执行DAG）
+ * @typedef {Object} StepInfo
+ * @property {number} stepIndex - 步骤索引
+ * @property {StepStatus} status - 步骤状态
+ * @property {string} description - 步骤描述
+ * @property {number[]} dependsOn - 依赖的步骤索引数组
+ */
+
+/**
+ * 执行模式状态
+ * @typedef {Object} ExecutionModeState
+ * @property {ExecutionMode} mode - 当前执行模式
+ * @property {number} maxParallel - 最大并行数
+ * @property {StepInfo[]} steps - 所有步骤状态列表
  */
 ```
 
@@ -206,7 +237,12 @@ class App {
       workspaces: [],
       messages: [],
       isAnalyzing: false,
-      activeTab: 'scope'
+      activeTab: 'scope',
+      // 新增：执行模式相关状态
+      executionMode: 'serial',
+      maxParallel: 3,
+      steps: [],
+      parallelRunningSteps: [] // 当前正在并行执行的步骤
     };
     this.init();
   }
@@ -261,6 +297,58 @@ class App {
       this.showError(payload.error);
     });
 
+    // 新增：执行模式相关消息处理
+    this.ws.on('EXECUTION_MODE_SET', (payload) => {
+      this.state.executionMode = payload.mode;
+      this.state.maxParallel = payload.maxParallel;
+      this.updateModeSelector();
+    });
+
+    this.ws.on('EXECUTION_MODE_CHANGED', (payload) => {
+      this.state.executionMode = payload.mode;
+      this.state.maxParallel = payload.maxParallel;
+      this.updateModeSelector();
+    });
+
+    this.ws.on('STEPS_STATUS', (payload) => {
+      this.state.steps = payload.steps;
+      this.renderStepsStatus();
+    });
+
+    this.ws.on('PARALLEL_STEP_STARTED', (payload) => {
+      // 添加到正在运行的并行步骤列表
+      if (!this.state.parallelRunningSteps.find(s => s.stepIndex === payload.stepIndex)) {
+        this.state.parallelRunningSteps.push({
+          stepIndex: payload.stepIndex,
+          description: payload.description,
+          parallelGroup: payload.parallelGroup
+        });
+      }
+      this.renderParallelStatus();
+    });
+
+    this.ws.on('PARALLEL_STEP_COMPLETED', (payload) => {
+      // 从正在运行的步骤列表中移除
+      this.state.parallelRunningSteps = this.state.parallelRunningSteps.filter(
+        s => s.stepIndex !== payload.stepIndex
+      );
+      // 更新步骤状态
+      const step = this.state.steps.find(s => s.stepIndex === payload.stepIndex);
+      if (step) {
+        step.status = payload.status;
+      }
+      this.renderParallelStatus();
+      this.renderStepsStatus();
+    });
+
+    this.ws.on('SCOPE_LOCK_ACQUIRED', (payload) => {
+      this.showScopeLockIndicator(payload.stepIndex, true);
+    });
+
+    this.ws.on('SCOPE_LOCK_RELEASED', (payload) => {
+      this.showScopeLockIndicator(payload.stepIndex, false);
+    });
+
     // 初始化UI
     this.initUI();
   }
@@ -290,10 +378,38 @@ class App {
           <div id="workspace-header" class="workspace-header hidden">
             <h2 id="workspace-title"></h2>
             <span id="workspace-id" class="workspace-id"></span>
+            <div id="mode-selector" class="mode-selector">
+              <label class="mode-toggle">
+                <input type="checkbox" id="parallel-mode-toggle">
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">并行执行</span>
+              </label>
+              <div id="max-parallel-control" class="max-parallel-control hidden">
+                <label>最大并行数:</label>
+                <input type="number" id="max-parallel-input" min="2" max="10" value="3">
+              </div>
+            </div>
           </div>
           <div id="messages-container" class="messages-container"></div>
           <div id="stage-indicator" class="stage-indicator hidden"></div>
           <div id="step-progress" class="step-progress hidden"></div>
+          <!-- 新增：并行执行状态显示区域 -->
+          <div id="parallel-status" class="parallel-status hidden">
+            <div class="parallel-header">
+              <span class="parallel-icon">⚡</span>
+              <span class="parallel-title">并行执行中</span>
+              <span id="parallel-count" class="parallel-count">0</span>
+            </div>
+            <div id="parallel-tasks" class="parallel-tasks"></div>
+          </div>
+          <!-- 新增：DAG步骤状态显示 -->
+          <div id="dag-view" class="dag-view hidden">
+            <div class="dag-header">
+              <span>执行计划 (DAG)</span>
+              <button id="toggle-dag-btn" class="btn-small">展开</button>
+            </div>
+            <div id="dag-container" class="dag-container"></div>
+          </div>
           <div class="input-area">
             <textarea id="message-input" placeholder="输入你的问题..."></textarea>
             <button id="send-btn">发送</button>
@@ -342,6 +458,137 @@ class App {
         this.switchTab(btn.dataset.tab);
       });
     });
+
+    // 新增：执行模式选择事件
+    document.getElementById('parallel-mode-toggle').addEventListener('change', (e) => {
+      this.toggleParallelMode(e.target.checked);
+    });
+
+    document.getElementById('max-parallel-input').addEventListener('change', (e) => {
+      this.setMaxParallel(parseInt(e.target.value, 10));
+    });
+
+    document.getElementById('toggle-dag-btn').addEventListener('click', () => {
+      this.toggleDagView();
+    });
+  }
+
+  // 新增：执行模式相关方法
+  toggleParallelMode(enabled) {
+    const mode = enabled ? 'parallel' : 'serial';
+    this.state.executionMode = mode;
+
+    // 显示/隐藏最大并行数控制
+    const maxParallelControl = document.getElementById('max-parallel-control');
+    if (enabled) {
+      maxParallelControl.classList.remove('hidden');
+    } else {
+      maxParallelControl.classList.add('hidden');
+    }
+
+    // 发送模式设置到服务器
+    if (this.state.selectedWorkspace) {
+      this.ws.send('SET_EXECUTION_MODE', {
+        workspaceId: this.state.selectedWorkspace.workspaceId,
+        mode: mode,
+        maxParallel: this.state.maxParallel
+      });
+    }
+  }
+
+  setMaxParallel(value) {
+    if (value < 2 || value > 10) return;
+    this.state.maxParallel = value;
+
+    if (this.state.selectedWorkspace && this.state.executionMode === 'parallel') {
+      this.ws.send('SET_EXECUTION_MODE', {
+        workspaceId: this.state.selectedWorkspace.workspaceId,
+        mode: 'parallel',
+        maxParallel: value
+      });
+    }
+  }
+
+  updateModeSelector() {
+    const toggle = document.getElementById('parallel-mode-toggle');
+    const maxParallelControl = document.getElementById('max-parallel-control');
+    const maxParallelInput = document.getElementById('max-parallel-input');
+
+    toggle.checked = this.state.executionMode === 'parallel';
+    maxParallelInput.value = this.state.maxParallel;
+
+    if (this.state.executionMode === 'parallel') {
+      maxParallelControl.classList.remove('hidden');
+    } else {
+      maxParallelControl.classList.add('hidden');
+    }
+  }
+
+  renderParallelStatus() {
+    const container = document.getElementById('parallel-status');
+    const countEl = document.getElementById('parallel-count');
+    const tasksEl = document.getElementById('parallel-tasks');
+
+    if (this.state.parallelRunningSteps.length === 0) {
+      container.classList.add('hidden');
+      return;
+    }
+
+    container.classList.remove('hidden');
+    countEl.textContent = this.state.parallelRunningSteps.length;
+
+    tasksEl.innerHTML = this.state.parallelRunningSteps.map((step, idx) => `
+      <div class="parallel-task-item" data-step-index="${step.stepIndex}">
+        <span class="task-index">${idx + 1}</span>
+        <span class="task-description">${this.escapeHtml(step.description)}</span>
+        <span class="task-status running">运行中</span>
+      </div>
+    `).join('');
+  }
+
+  renderStepsStatus() {
+    const container = document.getElementById('dag-container');
+    if (this.state.steps.length === 0) {
+      document.getElementById('dag-view').classList.add('hidden');
+      return;
+    }
+
+    document.getElementById('dag-view').classList.remove('hidden');
+
+    // 渲染DAG视图
+    container.innerHTML = this.state.steps.map(step => {
+      const statusClass = `status-${step.status}`;
+      const dependsOnStr = step.dependsOn?.length > 0
+        ? `依赖: ${step.dependsOn.join(', ')}`
+        : '无依赖';
+      return `
+        <div class="dag-step ${statusClass}" data-step-index="${step.stepIndex}">
+          <div class="step-index">${step.stepIndex + 1}</div>
+          <div class="step-description">${this.escapeHtml(step.description || '步骤 ' + step.stepIndex)}</div>
+          <div class="step-status">${step.status}</div>
+          <div class="step-depends">${dependsOnStr}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  toggleDagView() {
+    const container = document.getElementById('dag-container');
+    const btn = document.getElementById('toggle-dag-btn');
+    container.classList.toggle('collapsed');
+    btn.textContent = container.classList.contains('collapsed') ? '展开' : '收起';
+  }
+
+  showScopeLockIndicator(stepIndex, locked) {
+    // 在DAG视图中显示Scope锁状态
+    const stepEl = document.querySelector(`.dag-step[data-step-index="${stepIndex}"]`);
+    if (stepEl) {
+      if (locked) {
+        stepEl.classList.add('scope-locked');
+      } else {
+        stepEl.classList.remove('scope-locked');
+      }
+    }
   }
 
   renderWorkspaceList() {
@@ -408,10 +655,12 @@ class App {
     // 清空输入框
     input.value = '';
 
-    // 发送分析请求
+    // 发送分析请求（包含执行模式）
     this.ws.send('START_ANALYSIS', {
       workspaceId: this.state.selectedWorkspace.workspaceId,
-      input: message
+      input: message,
+      mode: this.state.executionMode,
+      maxParallel: this.state.maxParallel
     });
   }
 
@@ -545,4 +794,244 @@ class App {
 
 // 启动应用
 new App();
+```
+
+## 新增样式定义
+
+### 执行模式选择器样式
+```css
+.mode-selector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.mode-toggle input {
+  display: none;
+}
+
+.toggle-slider {
+  width: 40px;
+  height: 20px;
+  background-color: #3A3A3A;
+  border-radius: 10px;
+  position: relative;
+  transition: background-color 0.3s;
+}
+
+.toggle-slider::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: #E8E8E8;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.3s;
+}
+
+.mode-toggle input:checked + .toggle-slider {
+  background-color: #D97757;
+}
+
+.mode-toggle input:checked + .toggle-slider::after {
+  transform: translateX(20px);
+}
+
+.toggle-label {
+  margin-left: 8px;
+  font-size: 13px;
+  color: #888888;
+}
+
+.max-parallel-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.max-parallel-control label {
+  font-size: 12px;
+  color: #888888;
+}
+
+.max-parallel-control input {
+  width: 50px;
+  padding: 4px 8px;
+  background: #2A2A2A;
+  border: 1px solid #3A3A3A;
+  color: #E8E8E8;
+  border-radius: 4px;
+}
+```
+
+### 并行状态显示样式
+```css
+.parallel-status {
+  background: #2A2A2A;
+  border: 1px solid #3A3A3A;
+  border-radius: 8px;
+  margin: 8px 16px;
+  padding: 12px;
+}
+
+.parallel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.parallel-icon {
+  color: #D97757;
+}
+
+.parallel-title {
+  font-weight: 600;
+  color: #E8E8E8;
+}
+
+.parallel-count {
+  background: #D97757;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.parallel-tasks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.parallel-task-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1A1A1A;
+  padding: 6px 12px;
+  border-radius: 4px;
+  border-left: 3px solid #D97757;
+}
+
+.task-index {
+  font-weight: 600;
+  color: #D97757;
+}
+
+.task-description {
+  color: #E8E8E8;
+  font-size: 13px;
+}
+
+.task-status.running {
+  color: #4CAF50;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+```
+
+### DAG视图样式
+```css
+.dag-view {
+  background: #2A2A2A;
+  border: 1px solid #3A3A3A;
+  border-radius: 8px;
+  margin: 8px 16px;
+}
+
+.dag-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #3A3A3A;
+}
+
+.dag-header span {
+  font-weight: 600;
+  color: #E8E8E8;
+}
+
+.dag-container {
+  padding: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.dag-container.collapsed {
+  display: none;
+}
+
+.dag-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  margin-bottom: 4px;
+  background: #1A1A1A;
+  border-radius: 4px;
+  border-left: 3px solid #3A3A3A;
+}
+
+.dag-step.status-pending {
+  border-left-color: #888888;
+}
+
+.dag-step.status-running {
+  border-left-color: #D97757;
+  background: rgba(217, 119, 87, 0.1);
+}
+
+.dag-step.status-completed {
+  border-left-color: #4CAF50;
+}
+
+.dag-step.status-failed {
+  border-left-color: #F44336;
+}
+
+.dag-step.status-waiting {
+  border-left-color: #FF9800;
+}
+
+.dag-step.scope-locked::after {
+  content: '🔒';
+  margin-left: auto;
+}
+
+.step-index {
+  font-weight: 600;
+  color: #D97757;
+  min-width: 24px;
+}
+
+.step-description {
+  flex: 1;
+  color: #E8E8E8;
+}
+
+.step-status {
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.step-depends {
+  font-size: 11px;
+  color: #888888;
+}
+```
 ```

@@ -5,6 +5,7 @@ import { AgentOrchestrator, WorkflowStage } from '../agents/orchestrator/index.j
 import { callLLM } from '../services/agent.js';
 import { workspaceManager } from '../utils/workspace-manager.js';
 import { scopeManager } from '../utils/scope-manager.js';
+import { conversationLogger } from '../utils/conversation-logger.js';
 
 export class OrchestratorAdapter {
     constructor(wsServer, workspaceId, clientId) {
@@ -14,8 +15,17 @@ export class OrchestratorAdapter {
         this.orchestrator = null;
         this.pendingQuestion = null;
         this.skillRegistry = null;
+        this.conversationLogger = conversationLogger;
 
-        this.setupOrchestrator();
+        // 保存初始化 Promise，以便在 run() 中等待
+        this._initPromise = this.setupOrchestrator();
+    }
+
+    /**
+     * 等待初始化完成
+     */
+    async _waitForInit() {
+        await this._initPromise;
     }
 
     /**
@@ -93,6 +103,16 @@ export class OrchestratorAdapter {
             emit('COLLECTION_ERROR', { workspaceId: this.workspaceId, ...data });
         });
 
+        // Agent消息 - 发送到前端显示
+        this.orchestrator.on('agent:message', (data) => {
+            emit('AGENT_MESSAGE', {
+                workspaceId: this.workspaceId,
+                agent: data.agent || 'Agent',
+                message: data.message,
+                stage: data.stage
+            });
+        });
+
         // 规划阶段事件
         this.orchestrator.on('planning:started', (data) => {
             emit('PLANNING_STARTED', { workspaceId: this.workspaceId, ...data });
@@ -156,6 +176,11 @@ export class OrchestratorAdapter {
 
         // 问题事件 - 关键：需要用户输入
         this.orchestrator.on('question:asked', async (data) => {
+            // 记录 QuestionAgent 的问题
+            this.conversationLogger.logAgentMessage('QuestionAgent', data.question, 'COLLECTING').catch(err => {
+                console.error('[OrchestratorAdapter] Failed to log question:', err);
+            });
+
             emit('AGENT_MESSAGE', {
                 workspaceId: this.workspaceId,
                 agent: 'QuestionAgent',
@@ -165,6 +190,13 @@ export class OrchestratorAdapter {
 
             // 等待用户输入
             await this.waitForUserInput();
+        });
+
+        // 阶段变更 - 记录阶段变化
+        this.orchestrator.on('stage:changed', (data) => {
+            this.conversationLogger.logStageChange(data.to).catch(err => {
+                console.error('[OrchestratorAdapter] Failed to log stage change:', err);
+            });
         });
     }
 
@@ -181,9 +213,20 @@ export class OrchestratorAdapter {
      * 处理用户输入
      */
     handleUserInput(input) {
+        // 记录用户输入（非阻塞）
+        this.conversationLogger.logUserMessage(input).catch(err => {
+            console.error('[OrchestratorAdapter] Failed to log user input:', err);
+        });
+
+        // 触发 adapter 层面的 Promise resolve
         if (this.pendingQuestion) {
             this.pendingQuestion(input);
             this.pendingQuestion = null;
+        }
+
+        // 同时触发 orchestrator 层面的 Promise resolve
+        if (this.orchestrator && this.orchestrator.handleUserInput) {
+            this.orchestrator.handleUserInput(input);
         }
     }
 
@@ -199,9 +242,16 @@ export class OrchestratorAdapter {
      */
     async run(initialInput) {
         try {
-            // 初始化workspace
-            await workspaceManager.initialize();
+            // 等待初始化完成
+            await this._waitForInit();
+
+            // 使用已有的workspace（由message-handler传入的workspaceId）
+            await workspaceManager.initialize(this.workspaceId);
             await scopeManager.initialize();
+
+            // 初始化对话日志
+            await this.conversationLogger.initialize(this.workspaceId);
+            await this.conversationLogger.logUserMessage(initialInput);
 
             // 运行orchestrator
             const result = await this.orchestrator.run(initialInput);
@@ -221,6 +271,9 @@ export class OrchestratorAdapter {
                 stack: error.stack
             });
             throw error;
+        } finally {
+            // 关闭对话日志
+            await this.conversationLogger.close();
         }
     }
 

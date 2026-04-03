@@ -28,6 +28,25 @@ User Input → QuestionAgent → PlanAgent → ExecuteAgent (per step)
 **Workflow Stages** (managed by `WorkflowStateMachine`):
 - `IDLE` → `COLLECTING` → `PLANNING` → `EXECUTING` → `REVIEWING` → `COMPLETED`
 
+### Parallel Execution Mode
+
+The system supports both **serial** and **parallel** execution modes:
+
+- **Serial mode** (default): Steps execute sequentially in a while loop
+- **Parallel mode**: Steps execute concurrently using DAG-based dependency resolution
+
+**Supported since commit**: `cd83e4b` (Merge branch 'feature/parallel-tasks')
+
+Key differences:
+| Feature | Serial Mode | Parallel Mode |
+|---------|-------------|---------------|
+| Plan structure | steps array | DAG (Directed Acyclic Graph) |
+| Execution | while loop | p-limit concurrency |
+| Dependencies | next_step_hint | explicit depends_on + implicit inference |
+| Scope updates | direct write | lock mechanism |
+
+See `docs/parallel/README.md` for detailed parallel execution documentation.
+
 ### Agent Components
 
 - **QuestionAgent**: Uses ReAct (Thought → Action → Observation) to collect user requirements through interactive questioning. Stores data in `infos` object with `user_questions`, `goal`, and `basic_infos`.
@@ -151,10 +170,15 @@ Key dependencies:
 # Install dependencies
 npm install
 
-# Run the main application (interactive mode)
+# Run the main application (interactive mode, serial execution)
 npm start
 # or
 node src/index.js
+
+# Run in parallel execution mode
+node src/index.js --parallel
+# or
+node src/index.js -p
 
 # Run Etherscan API test
 npm test
@@ -170,7 +194,19 @@ Environment variables (in `.env`):
 - `ETHERSCAN_API_KEY` - Etherscan API key
 - `HTTP_PROXY` - Proxy URL (defaults to `http://127.0.0.1:7890`)
 
+**Parallel execution configuration** (optional):
+- `MAX_PARALLEL_TASKS` - Maximum parallel tasks (default: 3)
+- `USE_PARALLEL_EXECUTION` - Enable parallel mode (`true`/`false`)
+- `CONTINUE_ON_FAILURE` - Continue on failure (`true`/`false`)
+
 **Note**: The `.env` file and `data/` directory are excluded from git (see `.gitignore`). Create `.env` locally with your API keys.
+
+## Documentation
+
+Detailed documentation available in `docs/`:
+- `docs/orchestrator/` - Orchestrator architecture, events, workflow, API
+- `docs/parallel/` - Parallel execution design and implementation
+- `docs/execute-skills.md` - Skill system details
 
 ## Key Files and Structure
 

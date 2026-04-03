@@ -1,0 +1,20 @@
+{
+  "name": "sherblock-frontend",
+  "version": "1.0.0",
+  "description": "Sherblock WebUI - Blockchain Transaction Analysis Agent",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": ["blockchain", "ethereum", "analysis", "agent"],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "vite": "^8.0.3"
+  },
+  "dependencies": {
+    "marked": "^17.0.5"
+  }
+}

@@ -29,8 +29,8 @@ export class Server {
         this.wsServer = new WebSocketServer({ port: this.wsPort });
         await this.wsServer.start();
 
-        // 启动文件监听器
-        this.workspaceWatcher = new WorkspaceWatcher(this.wsServer);
+        // 启动文件监听器（需要传入messageHandler以获取工作区列表）
+        this.workspaceWatcher = new WorkspaceWatcher(this.wsServer, this.wsServer.messageHandler);
         this.workspaceWatcher.start();
 
         console.log('[Server] Server started successfully');

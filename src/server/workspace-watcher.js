@@ -5,8 +5,9 @@ import { watch } from 'chokidar';
 import { join, sep } from 'path';
 
 export class WorkspaceWatcher {
-    constructor(wsServer) {
+    constructor(wsServer, messageHandler) {
         this.wsServer = wsServer;
+        this.messageHandler = messageHandler;
         this.watcher = null;
         this.debounceTimers = new Map();
     }
@@ -65,9 +66,9 @@ export class WorkspaceWatcher {
             clearTimeout(this.debounceTimers.get(debounceKey));
         }
 
-        const timer = setTimeout(() => {
+        const timer = setTimeout(async () => {
             this.debounceTimers.delete(debounceKey);
-            this.processDirChange(event, dirPath);
+            await this.processDirChange(event, dirPath);
         }, 200);
 
         this.debounceTimers.set(debounceKey, timer);
@@ -118,7 +119,7 @@ export class WorkspaceWatcher {
     /**
      * 处理目录变化并发送通知
      */
-    processDirChange(event, dirPath) {
+    async processDirChange(event, dirPath) {
         const parts = dirPath.split(/[\/\\]/);
         const dataIndex = parts.indexOf('data');
 
@@ -151,11 +152,10 @@ export class WorkspaceWatcher {
         // 广播目录变化消息
         this.wsServer.broadcast('DIR_CHANGED', dirInfo, workspaceId);
 
-        // 如果是新建工作区，广播工作区列表更新
+        // 如果是新建工作区，广播完整的工作区列表
         if (event === 'add' && !fileType) {
-            this.wsServer.broadcast('WORKSPACES_LIST', {
-                workspaces: [] // 客户端会重新获取
-            });
+            const workspaces = await this.messageHandler.listWorkspaces();
+            this.wsServer.broadcast('WORKSPACES_LIST', { workspaces });
         }
     }
 

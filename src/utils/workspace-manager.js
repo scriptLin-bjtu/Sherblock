@@ -40,16 +40,26 @@ export class WorkspaceManager {
 
     /**
      * Initialize workspace - generate ID and create directory structure
+     * If already initialized with a workspaceId, this will ensure directories exist
      */
-    async initialize() {
-        if (this.initialized) {
+    async initialize(workspaceId = null) {
+        // If already initialized with a workspaceId, just ensure directories exist
+        if (this.initialized && this.workspaceId) {
+            await mkdir(this.workspacePath, { recursive: true });
+            await mkdir(join(this.workspacePath, 'logs'), { recursive: true });
+            await mkdir(join(this.workspacePath, 'charts'), { recursive: true });
+            await mkdir(join(this.workspacePath, 'reports'), { recursive: true });
             return;
         }
 
-        try {
-            // Generate workspace ID
+        // If workspaceId is provided, use it; otherwise generate a new one
+        if (workspaceId) {
+            this.workspaceId = workspaceId;
+        } else {
             this.workspaceId = this._generateWorkspaceId();
+        }
 
+        try {
             // Set workspace path
             this.workspacePath = join(process.cwd(), 'data', this.workspaceId);
 
@@ -126,6 +136,23 @@ export class WorkspaceManager {
      */
     isInitialized() {
         return this.initialized;
+    }
+
+    /**
+     * Set workspace ID directly (for using existing workspace)
+     */
+    async setWorkspaceId(workspaceId) {
+        this.workspaceId = workspaceId;
+        this.workspacePath = join(process.cwd(), 'data', this.workspaceId);
+
+        // 确保目录存在
+        await mkdir(this.workspacePath, { recursive: true });
+        await mkdir(join(this.workspacePath, 'logs'), { recursive: true });
+        await mkdir(join(this.workspacePath, 'charts'), { recursive: true });
+        await mkdir(join(this.workspacePath, 'reports'), { recursive: true });
+
+        this.initialized = true;
+        console.log(`[WorkspaceManager] Set workspace: ${this.workspaceId}`);
     }
 
     /**

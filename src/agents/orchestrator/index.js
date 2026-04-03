@@ -68,6 +68,10 @@ export class AgentOrchestrator {
         this._pausePromise = null;
         this._pauseResolve = null;
 
+        // 用户输入等待 Promise（用于 WebSocket 模式）
+        this._userInputPromise = null;
+        this._userInputResolve = null;
+
         // Bind event handlers
         this._setupStateMachineHooks();
     }
@@ -258,25 +262,30 @@ export class AgentOrchestrator {
         this._emit("collection:started", { initialInput });
 
         try {
-            // Get or create readline interface for user input
+            // 检查是否有外部传入的 readline（CLI 模式）
+            const hasReadline = !!this._options.readline;
+
+            // 创建 askUser 函数
+            let askUser;
             let rl = this._options.readline;
             let createdRl = false;
 
-            if (!rl) {
-                // Create a readline interface if not provided
-                const readlineModule = await import("node:readline");
-                rl = readlineModule.createInterface({
-                    input: process.stdin,
-                    output: process.stdout,
-                });
-                createdRl = true;
+            if (hasReadline) {
+                // CLI 模式：使用传入的 readline
+                askUser = (question) => {
+                    return new Promise((resolve) => {
+                        rl.question(question + "\n", resolve);
+                    });
+                };
+            } else {
+                // WebSocket 模式：使用 orchestrator 的异步等待机制
+                askUser = (question) => {
+                    return new Promise((resolve) => {
+                        // 保存 resolve 函数供外部 handleUserInput 调用
+                        this._userInputResolve = resolve;
+                    });
+                };
             }
-
-            const askUser = (question) => {
-                return new Promise((resolve) => {
-                    rl.question(question + "\n", resolve);
-                });
-            };
 
             // Use QuestionAgent's collectRequirements method
             const infos = await this.questionAgent.collectRequirements(
@@ -284,16 +293,16 @@ export class AgentOrchestrator {
                 {
                     onQuestion: async (question) => {
                         this._emit("question:asked", { question });
-                        // Get user input from stdin
+                        // 使用对应的方式获取用户输入
                         const answer = await askUser(question);
                         return answer;
                     },
                 },
             );
 
-            // Close readline if we created it
-            if (createdRl && rl) {
-                rl.close();
+            // 仅在 CLI 模式且创建了 rl 时关闭
+            if (!hasReadline && !rl) {
+                // WebSocket 模式下不需要关闭 rl
             }
 
             this._emit("collection:completed", { infos });
@@ -825,6 +834,28 @@ export class AgentOrchestrator {
      */
     _emit(event, data) {
         this.eventBus.emit(event, data);
+    }
+
+    /**
+     * 等待用户回答问题（用于 WebSocket 模式）
+     * 返回一个 Promise，由外部通过 handleUserInput 调用 resolve
+     * @private
+     */
+    _waitForQuestionAnswer() {
+        return new Promise((resolve) => {
+            this._userInputResolve = resolve;
+        });
+    }
+
+    /**
+     * 处理用户输入（由外部 adapter 调用）
+     * @param {string} input - 用户输入
+     */
+    handleUserInput(input) {
+        if (this._userInputResolve) {
+            this._userInputResolve(input);
+            this._userInputResolve = null;
+        }
     }
 
     /**
