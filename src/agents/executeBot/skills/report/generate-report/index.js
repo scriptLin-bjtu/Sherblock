@@ -251,7 +251,7 @@ export default {
     name: "GENERATE_MARKDOWN_REPORT",
 
     description:
-        "Generate a structured markdown analysis report file and save it to the project's reports/ directory. If the content parameter is provided, use the custom content directly; otherwise, generate a report from the scope containing summary, goals, key findings, and detailed data. IMPORTANT: The 'content' parameter should NOT contain any image references (markdown image syntax like ![alt](path)). Images will be automatically loaded and inserted by the system code from the charts/ directory.",
+        "Generate a structured markdown analysis report file and save it to the project's reports/ directory. If the content parameter is provided, use the custom content directly; otherwise, generate a report from the scope containing summary, goals, key findings, and detailed data. IMPORTANT: The 'content' parameter should NOT contain any image references (markdown image syntax like ![alt](path)). Images will be automatically loaded and inserted by the system code from the charts/ directory. NOTE: Generate the report in English language regardless of the user's input language.",
 
     category: "report",
 

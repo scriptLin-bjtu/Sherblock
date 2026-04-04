@@ -44,6 +44,9 @@ export class HttpServer {
         this.app.get('/api/workspaces', this.getWorkspaces.bind(this));
         this.app.get('/api/workspaces/:id', this.getWorkspace.bind(this));
         this.app.delete('/api/workspaces/:id', this.deleteWorkspace.bind(this));
+
+        // API endpoint for workspace file access (charts, reports, logs)
+        this.app.get('/api/workspace/:id/file/:type/:filename', this.getWorkspaceFile.bind(this));
     }
 
     async getWorkspaces(req, res) {
@@ -78,6 +81,53 @@ export class HttpServer {
             res.json({ success: true, workspaceId });
         } catch (error) {
             res.status(500).json({ error: error.message });
+        }
+    }
+
+    async getWorkspaceFile(req, res) {
+        try {
+            const { id, type, filename } = req.params;
+            const validTypes = ['charts', 'reports', 'logs'];
+
+            // Validate type
+            if (!validTypes.includes(type)) {
+                return res.status(400).json({ error: 'Invalid file type' });
+            }
+
+            // Security check: prevent path traversal
+            if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+                return res.status(400).json({ error: 'Invalid filename' });
+            }
+
+            // Build file path
+            const dataDir = join(process.cwd(), 'data');
+            const filePath = join(dataDir, id, type, filename);
+
+            // Verify file exists within data directory
+            if (!filePath.startsWith(dataDir)) {
+                return res.status(403).json({ error: 'Forbidden' });
+            }
+
+            // Set Content-Type based on file extension
+            if (filename.endsWith('.svg')) {
+                res.setHeader('Content-Type', 'image/svg+xml');
+            } else if (filename.endsWith('.md')) {
+                res.setHeader('Content-Type', 'text/markdown;charset=utf-8');
+            } else if (filename.endsWith('.json')) {
+                res.setHeader('Content-Type', 'application/json');
+            } else if (filename.endsWith('.log')) {
+                res.setHeader('Content-Type', 'text/plain;charset=utf-8');
+            } else if (filename.endsWith('.txt')) {
+                res.setHeader('Content-Type', 'text/plain;charset=utf-8');
+            }
+
+            res.sendFile(filePath);
+        } catch (error) {
+            if (error.code === 'ENOENT') {
+                res.status(404).json({ error: 'File not found' });
+            } else {
+                res.status(500).json({ error: error.message });
+            }
         }
     }
 

@@ -5,17 +5,18 @@ import { AgentOrchestrator, WorkflowStage } from '../agents/orchestrator/index.j
 import { callLLM } from '../services/agent.js';
 import { workspaceManager } from '../utils/workspace-manager.js';
 import { scopeManager } from '../utils/scope-manager.js';
-import { conversationLogger } from '../utils/conversation-logger.js';
+import { workflowLogger } from '../utils/workflow-logger.js';
 
 export class OrchestratorAdapter {
-    constructor(wsServer, workspaceId, clientId) {
+    constructor(wsServer, workspaceId, clientId, options = {}) {
         this.wsServer = wsServer;
         this.workspaceId = workspaceId;
         this.clientId = clientId;
+        this.options = options;
         this.orchestrator = null;
         this.pendingQuestion = null;
         this.skillRegistry = null;
-        this.conversationLogger = conversationLogger;
+        this.workflowLogger = workflowLogger;
 
         // 保存初始化 Promise，以便在 run() 中等待
         this._initPromise = this.setupOrchestrator();
@@ -32,15 +33,18 @@ export class OrchestratorAdapter {
      * 设置Orchestrator
      */
     async setupOrchestrator() {
-        // 初始化执行Agent以获取skill registry
-        const { ExecuteAgentV2 } = await import('../agents/executeBot/agent-v2.js');
-        const executeAgent = new ExecuteAgentV2(callLLM, scopeManager);
-        await executeAgent.initialize();
-        this.skillRegistry = executeAgent.skillRegistry;
+        // 直接初始化 SkillRegistry
+        const { SkillRegistry } = await import('../agents/executeBot/skills/index.js');
+        const skillRegistry = new SkillRegistry();
+        await skillRegistry.initialize();
+        this.skillRegistry = skillRegistry;
 
         // 创建Orchestrator
         this.orchestrator = new AgentOrchestrator(callLLM, {
-            readline: null // 不使用stdin，由WebSocket处理
+            readline: null, // 不使用stdin，由WebSocket处理
+            useParallelExecution: this.options.useParallelExecution ?? true,
+            maxParallelTasks: this.options.maxParallelTasks ?? 3,
+            continueOnFailure: this.options.continueOnFailure ?? true,
         });
 
         // 设置事件监听
@@ -119,6 +123,11 @@ export class OrchestratorAdapter {
         });
 
         this.orchestrator.on('planning:completed', (data) => {
+            // 记录完整的计划日志
+            this.workflowLogger.logPlanGenerated(data.plan).catch(err => {
+                console.error('[OrchestratorAdapter] Failed to log plan:', err);
+            });
+
             emit('PLANNING_COMPLETED', { workspaceId: this.workspaceId, ...data });
         });
 
@@ -137,6 +146,11 @@ export class OrchestratorAdapter {
 
         // 步骤事件
         this.orchestrator.on('step:started', (data) => {
+            // 记录步骤开始（包含目标信息）
+            this.workflowLogger.logStepStart(data.stepIndex, data.step?.goal || data.step?.name || `Step ${data.stepIndex}`).catch(err => {
+                console.error('[OrchestratorAdapter] Failed to log step start:', err);
+            });
+
             emit('STEP_STARTED', {
                 workspaceId: this.workspaceId,
                 stepIndex: data.stepIndex,
@@ -145,6 +159,45 @@ export class OrchestratorAdapter {
         });
 
         this.orchestrator.on('step:completed', (data) => {
+            // 记录步骤完成
+            const stepName = data.step?.goal || data.step?.name || `Step ${data.stepIndex}`;
+            this.workflowLogger.logStepComplete(data.stepIndex, stepName, data.result).catch(err => {
+                console.error('[OrchestratorAdapter] Failed to log step complete:', err);
+            });
+
+            // 记录历史中的技能调用
+            if (data.result?.history && Array.isArray(data.result.history)) {
+                for (const entry of data.result.history) {
+                    if (entry.type === 'ACTION' && entry.content?.action_type === 'USE_SKILL') {
+                        this.workflowLogger.logSkillCall(
+                            entry.content.skill_name,
+                            entry.content.params
+                        ).catch(err => {
+                            console.error('[OrchestratorAdapter] Failed to log skill call:', err);
+                        });
+                    }
+                    if (entry.type === 'OBSERVATION' && entry.content?.includes && entry.content.includes('Skill result:')) {
+                        // 技能结果已在下一步的 observation 中记录，这里可以跳过
+                    }
+                }
+            }
+
+            // 记录 scope 更新
+            if (data.result?.scope) {
+                this.workflowLogger.logScopeUpdate(data.result.scope, stepName).catch(err => {
+                    console.error('[OrchestratorAdapter] Failed to log scope update:', err);
+                });
+            }
+
+            // 记录执行统计
+            if (data.result?.stats) {
+                this.workflowLogger.logAgentMessage('ExecuteAgent',
+                    `步骤执行完成 - 状态: ${data.result.status}, 技能调用: ${data.result.stats.totalSkillCalls || 0}, 迭代次数: ${data.result.stats.totalIterations || 0}`,
+                    'EXECUTING').catch(err => {
+                    console.error('[OrchestratorAdapter] Failed to log step summary:', err);
+                });
+            }
+
             emit('STEP_COMPLETED', {
                 workspaceId: this.workspaceId,
                 stepIndex: data.stepIndex,
@@ -166,6 +219,12 @@ export class OrchestratorAdapter {
         });
 
         this.orchestrator.on('review:completed', (data) => {
+            // 记录审查结果
+            const reviewData = { assessment: data.decision, ...data.adjustments };
+            this.workflowLogger.logReviewResult(reviewData, data.stepIndex).catch(err => {
+                console.error('[OrchestratorAdapter] Failed to log review result:', err);
+            });
+
             emit('REVIEW_COMPLETED', {
                 workspaceId: this.workspaceId,
                 stepIndex: data.stepIndex,
@@ -177,7 +236,7 @@ export class OrchestratorAdapter {
         // 问题事件 - 关键：需要用户输入
         this.orchestrator.on('question:asked', async (data) => {
             // 记录 QuestionAgent 的问题
-            this.conversationLogger.logAgentMessage('QuestionAgent', data.question, 'COLLECTING').catch(err => {
+            this.workflowLogger.logQuestion(data.question).catch(err => {
                 console.error('[OrchestratorAdapter] Failed to log question:', err);
             });
 
@@ -194,10 +253,11 @@ export class OrchestratorAdapter {
 
         // 阶段变更 - 记录阶段变化
         this.orchestrator.on('stage:changed', (data) => {
-            this.conversationLogger.logStageChange(data.to).catch(err => {
+            this.workflowLogger.logStageChange(data.from, data.to).catch(err => {
                 console.error('[OrchestratorAdapter] Failed to log stage change:', err);
             });
         });
+
     }
 
     /**
@@ -213,9 +273,9 @@ export class OrchestratorAdapter {
      * 处理用户输入
      */
     handleUserInput(input) {
-        // 记录用户输入（非阻塞）
-        this.conversationLogger.logUserMessage(input).catch(err => {
-            console.error('[OrchestratorAdapter] Failed to log user input:', err);
+        // 记录用户回答（非阻塞）
+        this.workflowLogger.logUserAnswer(input).catch(err => {
+            console.error('[OrchestratorAdapter] Failed to log user answer:', err);
         });
 
         // 触发 adapter 层面的 Promise resolve
@@ -249,12 +309,17 @@ export class OrchestratorAdapter {
             await workspaceManager.initialize(this.workspaceId);
             await scopeManager.initialize();
 
-            // 初始化对话日志
-            await this.conversationLogger.initialize(this.workspaceId);
-            await this.conversationLogger.logUserMessage(initialInput);
+            // 初始化工作流日志（JSON格式）
+            await this.workflowLogger.initialize(this.workspaceId);
+
+            // 记录用户初始输入
+            await this.workflowLogger.logUserInput(initialInput);
 
             // 运行orchestrator
             const result = await this.orchestrator.run(initialInput);
+
+            // 记录工作流完成
+            await this.workflowLogger.logWorkflowComplete(result);
 
             // 发送完成消息
             this.send('ANALYSIS_COMPLETED', {
@@ -265,6 +330,12 @@ export class OrchestratorAdapter {
             return result;
         } catch (error) {
             console.error('[OrchestratorAdapter] Error:', error);
+
+            // 记录错误
+            await this.workflowLogger.logError(error.message, 'run').catch(err => {
+                console.error('[OrchestratorAdapter] Failed to log error:', err);
+            });
+
             this.send('ERROR', {
                 workspaceId: this.workspaceId,
                 error: error.message,
@@ -272,8 +343,8 @@ export class OrchestratorAdapter {
             });
             throw error;
         } finally {
-            // 关闭对话日志
-            await this.conversationLogger.close();
+            // 关闭工作流日志
+            await this.workflowLogger.close();
         }
     }
 

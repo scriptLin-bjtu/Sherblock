@@ -96,11 +96,16 @@ export class WorkspaceWatcher {
         let filename = null;
 
         if (parts.length > dataIndex + 2) {
-            fileType = parts[dataIndex + 2]; // charts, reports, logs
-            filename = parts[dataIndex + 3];
+            const thirdPart = parts[dataIndex + 2];
+            // 检查是否是根目录文件 (scope.json, workflow.json 等)
+            if (thirdPart && (thirdPart.endsWith('.json') || thirdPart.endsWith('.md'))) {
+                filename = thirdPart;
+                // 根目录文件，fileType 为 null
+            } else {
+                fileType = thirdPart; // charts, reports, logs
+                filename = parts[dataIndex + 3];
+            }
         }
-
-        console.log(`[WorkspaceWatcher] File ${event}: ${filePath}`);
 
         // 构建文件信息
         const fileInfo = {
@@ -111,6 +116,24 @@ export class WorkspaceWatcher {
             path: filePath,
             timestamp: Date.now()
         };
+
+        // 专门处理 workflow.json 变化 (可能在 logs 目录或根目录)
+        if (filename === 'workflow.json') {
+            this.wsServer.broadcast('WORKFLOW_LOG_UPDATED', {
+                workspaceId,
+                event,
+                fileType,
+                filename: 'workflow.json',
+                path: filePath,
+                timestamp: Date.now()
+            }, workspaceId);
+            // 继续广播 FILE_CHANGED 以触发前端刷新
+        }
+
+        // 根目录文件也广播
+        if (!fileType && filename) {
+            this.wsServer.broadcast('FILE_CHANGED', fileInfo, workspaceId);
+        }
 
         // 广播文件变化消息
         this.wsServer.broadcast('FILE_CHANGED', fileInfo, workspaceId);

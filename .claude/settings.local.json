@@ -29,7 +29,8 @@
       "Bash(curl:*)",
       "Bash(npx vitest:*)",
       "mcp__ide__getDiagnostics",
-      "Bash(findstr /n \"getCurrent\")"
+      "Bash(findstr /n \"getCurrent\")",
+      "Bash(rm:*)"
     ]
   }
 }

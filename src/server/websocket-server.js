@@ -137,8 +137,20 @@ export class WebSocketServer {
             payload
         });
 
+        // 检查是否有任何客户端订阅了指定的工作区
+        let hasSubscribers = false;
+        if (workspaceId) {
+            for (const client of this.clients.values()) {
+                if (client.subscribedWorkspaces.has(workspaceId)) {
+                    hasSubscribers = true;
+                    break;
+                }
+            }
+        }
+
         this.clients.forEach((client, clientId) => {
-            if (workspaceId && !client.subscribedWorkspaces.has(workspaceId)) {
+            // 如果有指定 workspaceId 且有订阅者，只发给订阅者；否则发给所有客户端
+            if (workspaceId && hasSubscribers && !client.subscribedWorkspaces.has(workspaceId)) {
                 return;
             }
             if (client.ws.readyState === 1) {

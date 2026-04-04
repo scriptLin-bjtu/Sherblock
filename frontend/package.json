@@ -8,7 +8,12 @@
     "build": "vite build",
     "preview": "vite preview"
   },
-  "keywords": ["blockchain", "ethereum", "analysis", "agent"],
+  "keywords": [
+    "blockchain",
+    "ethereum",
+    "analysis",
+    "agent"
+  ],
   "author": "",
   "license": "ISC",
   "devDependencies": {

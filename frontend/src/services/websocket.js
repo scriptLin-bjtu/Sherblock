@@ -1,5 +1,5 @@
 /**
- * WebSocket服务 - 管理WebSocket连接、消息收发和重连逻辑
+ * WebSocket service - manages WebSocket connection, message sending/receiving and reconnection logic
  */
 
 class WebSocketService {
@@ -16,8 +16,8 @@ class WebSocketService {
   }
 
   /**
-   * 连接到WebSocket服务器
-   * @param {string} url - WebSocket服务器URL
+   * Connect to WebSocket server
+   * @param {string} url - WebSocket server URL
    */
   connect(url = 'ws://localhost:8080') {
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
@@ -45,7 +45,7 @@ class WebSocketService {
           console.log('[WebSocket] Received:', data.type);
           this.emit('message', data);
 
-          // 根据消息类型触发特定事件
+          // Trigger specific event based on message type
           if (data.type) {
             this.emit(data.type, data);
           }
@@ -77,7 +77,7 @@ class WebSocketService {
   }
 
   /**
-   * 定时重连
+   * Schedule reconnection
    */
   scheduleReconnect() {
     if (!this.shouldReconnect) return;
@@ -93,8 +93,8 @@ class WebSocketService {
   }
 
   /**
-   * 发送消息
-   * @param {object} data - 消息数据
+   * Send message
+   * @param {object} data - message data
    */
   send(data) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -106,10 +106,10 @@ class WebSocketService {
   }
 
   /**
-   * 发送消息并等待响应
-   * @param {object} data - 消息数据
-   * @param {string} responseType - 期望的响应类型
-   * @param {number} timeout - 超时时间(毫秒)
+   * Send message and wait for response
+   * @param {object} data - message data
+   * @param {string} responseType - expected response type
+   * @param {number} timeout - timeout in milliseconds
    * @returns {Promise}
    */
   sendAndWait(data, responseType, timeout = 30000) {
@@ -130,7 +130,7 @@ class WebSocketService {
   }
 
   /**
-   * 刷新消息队列
+   * Flush message queue
    */
   flushMessageQueue() {
     while (this.messageQueue.length > 0) {
@@ -140,7 +140,7 @@ class WebSocketService {
   }
 
   /**
-   * 断开连接
+   * Disconnect
    */
   disconnect() {
     this.shouldReconnect = false;
@@ -151,9 +151,9 @@ class WebSocketService {
   }
 
   /**
-   * 注册事件监听器
-   * @param {string} event - 事件类型
-   * @param {function} callback - 回调函数
+   * Register event listener
+   * @param {string} event - event type
+   * @param {function} callback - callback function
    */
   on(event, callback) {
     if (!this.listeners.has(event)) {
@@ -163,9 +163,9 @@ class WebSocketService {
   }
 
   /**
-   * 移除事件监听器
-   * @param {string} event - 事件类型
-   * @param {function} callback - 回调函数
+   * Remove event listener
+   * @param {string} event - event type
+   * @param {function} callback - callback function
    */
   off(event, callback) {
     if (!this.listeners.has(event)) return;
@@ -178,9 +178,9 @@ class WebSocketService {
   }
 
   /**
-   * 触发事件
-   * @param {string} event - 事件类型
-   * @param {any} data - 事件数据
+   * Emit event
+   * @param {string} event - event type
+   * @param {any} data - event data
    */
   emit(event, data) {
     if (!this.listeners.has(event)) return;
@@ -195,7 +195,7 @@ class WebSocketService {
   }
 
   /**
-   * 获取连接状态
+   * Get connection status
    * @returns {boolean}
    */
   isConnected() {
@@ -203,6 +203,6 @@ class WebSocketService {
   }
 }
 
-// 导出单例
+// Export singleton
 export const websocketService = new WebSocketService();
 export default websocketService;

@@ -47,6 +47,14 @@ Key differences:
 
 See `docs/parallel/README.md` for detailed parallel execution documentation.
 
+### Parallel Execution Components
+
+- **DAGBuilder** (`src/agents/orchestrator/dag-builder.js`): Builds directed acyclic graph from plan steps
+- **ParallelExecutor** (`src/agents/orchestrator/parallel-executor.js`): Executes steps concurrently with dependency resolution
+- **ScopeCoordinator** (`src/agents/orchestrator/scope-coordinator.js`): Manages thread-safe scope updates in parallel mode
+- **TaskScheduler** (`src/agents/orchestrator/task-scheduler.js`): Schedules and tracks parallel task execution
+- **DAGUtils** (`src/utils/dag-utils.js`): DAG utility functions for topological sorting and cycle detection
+
 ### Agent Components
 
 - **QuestionAgent**: Uses ReAct (Thought → Action → Observation) to collect user requirements through interactive questioning. Stores data in `infos` object with `user_questions`, `goal`, and `basic_infos`.
@@ -147,6 +155,40 @@ Each task execution creates a unique workspace directory to isolate task files:
   - `data/{workspaceId}/reports/` - Generated reports
   - `data/{workspaceId}/scope.json` - Persisted scope for debugging
 
+### Web Interface (Frontend)
+
+Vue.js frontend for real-time task monitoring:
+
+```bash
+cd frontend && npm run dev
+```
+
+Features:
+- Real-time workspace status via WebSocket
+- Task execution progress tracking
+- View generated reports and charts
+
+### Server System
+
+HTTP and WebSocket server for frontend communication:
+
+| Service | Port | Path |
+|---------|------|------|
+| HTTP | 3000 | http://localhost:3000 |
+| WebSocket | 8080 | ws://localhost:8080/ws |
+
+```bash
+# Start server
+node src/server-index.js
+```
+
+**Server Modules:**
+- `http-server.js` - Static file serving and REST API
+- `websocket-server.js` - Real-time message push
+- `workspace-watcher.js` - File system monitoring for workspace changes
+- `message-handler.js` - Client message processing
+- `workflow-logger.js` - Workflow event logging
+
 ### Context Compression (`src/agents/executeBot/compression/`)
 
 CompressionManager coordinates all compression operations:
@@ -156,34 +198,56 @@ CompressionManager coordinates all compression operations:
 
 ## Dependencies
 
-Key dependencies:
+Key backend dependencies:
 - `undici` - HTTP/1.1 client for making requests (includes ProxyAgent support)
 - `dotenv` - Environment variable management
-- `ethers` - Ethereum utilities (devDependency, currently v5.8.0 installed)
+- `express` - HTTP server framework
+- `ws` - WebSocket server
+- `chokidar` - File system watcher
+- `p-limit` - Promise concurrency limiter (for parallel execution)
 - `canvas` - Canvas implementation for Node.js (chart rendering)
 - `vega` - Visualization grammar for chart generation
 - `vega-lite` - High-level declarative format for visualizations
 
+Frontend dependencies (in `frontend/package.json`):
+- `vite` - Build tool and dev server
+- `marked` - Markdown rendering
+
+Test dependencies:
+- `vitest` - Unit testing framework
+
 ## Development Commands
 
 ```bash
-# Install dependencies
+# Install all dependencies (backend + frontend)
 npm install
+cd frontend && npm install
 
-# Run the main application (interactive mode, serial execution)
+# Run the main application (default: parallel execution)
 npm start
-# or
-node src/index.js
 
-# Run in parallel execution mode
-node src/index.js --parallel
-# or
-node src/index.js -p
+# Run serial execution mode
+node src/index.js
 
 # Run Etherscan API test
 npm test
+
+# Run unit tests
+npm run test:unit
+npm run test:watch  # watch mode
+
+# Start HTTP + WebSocket server (for frontend communication)
+npm run server
 # or
-node src/test.js
+node src/server-index.js
+
+# Start frontend development server
+npm run dev:frontend
+# or
+cd frontend && npm run dev
+
+# Start full dev environment (server + frontend)
+npm run dev
 ```
 
 ## Configuration
@@ -193,6 +257,10 @@ Environment variables (in `.env`):
 - `DEEPSEEK_API_KEY` - DeepSeek API key
 - `ETHERSCAN_API_KEY` - Etherscan API key
 - `HTTP_PROXY` - Proxy URL (defaults to `http://127.0.0.1:7890`)
+
+**Server configuration** (optional):
+- `HTTP_PORT` - HTTP server port (default: 3000)
+- `WS_PORT` - WebSocket server port (default: 8080)
 
 **Parallel execution configuration** (optional):
 - `MAX_PARALLEL_TASKS` - Maximum parallel tasks (default: 3)
@@ -213,35 +281,57 @@ Detailed documentation available in `docs/`:
 ```
 src/
 ├── index.js                    # Main entry point, agent initialization
+├── server-index.js             # Server entry point (HTTP + WebSocket)
 ├── test.js                     # Etherscan API test script
 ├── utils/
-│   ├── workspace-manager.js     # Workspace directory management
-│   └── scope-manager.js        # Scope persistence to JSON file
+│   ├── workspace-manager.js    # Workspace directory management
+│   ├── scope-manager.js        # Scope persistence to JSON file
+│   ├── workflow-logger.js      # Workflow event logging
+│   └── dag-utils.js            # DAG utility functions
 ├── services/
-│   └── agent.js               # LLM service with multi-provider support
+│   └── agent.js                # LLM service with multi-provider support
+├── server/
+│   ├── index.js                # Server core
+│   ├── http-server.js          # HTTP server
+│   ├── websocket-server.js     # WebSocket server
+│   ├── workspace-watcher.js    # File system watcher
+│   └── message-handler.js      # Client message processing
 └── agents/
     ├── questionBot/
-    │   ├── agent.js           # QuestionAgent - interactive info collection
-    │   └── prompt.js          # ReAct prompt for questioning
+    │   ├── agent.js            # QuestionAgent - interactive info collection
+    │   └── prompt.js           # ReAct prompt for questioning
     ├── planBot/
-    │   ├── agent.js           # PlanAgent - strategic planning
-    │   └── prompt.js          # Prompt for plan generation with scope/steps
+    │   ├── agent.js            # PlanAgent - strategic planning
+    │   ├── prompt-serial.js    # Serial plan prompt
+    │   └── prompt-parallel.js  # Parallel plan prompt
     ├── executeBot/
-    │   ├── agent.js           # ExecuteAgent - step execution with ReAct
+    │   ├── agent.js            # ExecuteAgent - step execution with ReAct
     │   ├── prompt-system.js    # System prompt for ExecuteAgent
-    │   ├── compression/       # Context compression system
+    │   ├── compression/        # Context compression system
     │   │   ├── config.js
     │   │   ├── manager.js
     │   │   ├── history-compressor.js
     │   │   └── scope-filter.js
-    │   └── skills/            # Modular skill system
-    │       ├── index.js       # Skill registry and loader
-    │       ├── lib/           # Shared libraries
+    │   └── skills/             # Modular skill system
+    │       ├── index.js        # Skill registry and loader
+    │       ├── lib/            # Shared libraries
     │       └── [category]/[skill]/index.js
     └── orchestrator/
-        ├── index.js           # AgentOrchestrator - central coordinator
-        ├── events.js          # EventBus implementation
-        └── state-machine.js   # Workflow state management with guards
+        ├── index.js            # AgentOrchestrator - central coordinator
+        ├── events.js           # EventBus implementation
+        ├── state-machine.js    # Workflow state management with guards
+        ├── dag-builder.js      # DAG builder for parallel execution
+        ├── parallel-executor.js# Parallel task executor
+        ├── scope-coordinator.js# Thread-safe scope coordination
+        └── task-scheduler.js   # Task scheduling
+
+frontend/                       # Vue.js frontend
+├── src/
+│   ├── main.js                # Frontend entry
+│   ├── app.js                 # Vue app component
+│   └── services/
+│       └── websocket.js       # WebSocket client
+└── package.json
 ```
 
 ## Important Implementation Details

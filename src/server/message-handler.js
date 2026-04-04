@@ -67,6 +67,9 @@ export default class MessageHandler {
                 case 'GET_LOG_CONTENT':
                     return await this.handleGetLogContent(message);
 
+                case 'GET_WORKFLOW_LOG':
+                    return await this.handleGetWorkflowLog(message);
+
                 default:
                     throw new Error(`Unknown message type: ${type}`);
             }
@@ -140,8 +143,8 @@ export default class MessageHandler {
         const workspacePath = join(process.cwd(), 'data', workspaceId);
 
         try {
-            const [scope, charts, reports, logs] = await Promise.all([
-                this.readScope(workspacePath),
+            const [workspaceInfo, charts, reports, logs] = await Promise.all([
+                this.getWorkspaceInfo(workspacePath, workspaceId),
                 this.readFiles(workspacePath, 'charts'),
                 this.readFiles(workspacePath, 'reports'),
                 this.readFiles(workspacePath, 'logs')
@@ -153,10 +156,11 @@ export default class MessageHandler {
                 timestamp: Date.now(),
                 payload: {
                     workspaceId,
-                    scope,
+                    scope: workspaceInfo?.scope,
                     charts,
                     reports,
-                    logs
+                    logs,
+                    workflowStatus: workspaceInfo?.workflowStatus
                 }
             };
         } catch (error) {
@@ -171,7 +175,8 @@ export default class MessageHandler {
                         scope: null,
                         charts: [],
                         reports: [],
-                        logs: []
+                        logs: [],
+                        workflowStatus: null
                     }
                 };
             }
@@ -258,9 +263,13 @@ export default class MessageHandler {
 
         console.log(`[MessageHandler] Starting analysis for workspace ${workspaceId}`);
 
-        // 创建Orchestrator适配器
+        // 创建Orchestrator适配器（默认启用并行执行）
         const { OrchestratorAdapter } = await import('../adapters/orchestrator-adapter.js');
-        const adapter = new OrchestratorAdapter(this.wsServer, workspaceId, clientId);
+        const adapter = new OrchestratorAdapter(this.wsServer, workspaceId, clientId, {
+            useParallelExecution: true,
+            maxParallelTasks: 3,
+            continueOnFailure: true,
+        });
 
         this.activeWorkflows.set(workspaceId, adapter);
 
@@ -452,6 +461,109 @@ export default class MessageHandler {
         }
     }
 
+    /**
+     * 获取工作流日志（JSON格式）
+     */
+    async handleGetWorkflowLog(message) {
+        const { workspaceId } = message.payload;
+        const workspacePath = join(process.cwd(), 'data', workspaceId);
+        const logPath = join(workspacePath, 'logs', 'workflow.json');
+
+        try {
+            const content = await readFile(logPath, 'utf-8');
+            let logs;
+
+            // 尝试解析 JSON，失败时尝试修复
+            try {
+                logs = JSON.parse(content);
+            } catch (parseError) {
+                // JSON 损坏，尝试修复：找到最后一个完整的 JSON 对象
+                console.warn('[MessageHandler] JSON parse failed, attempting repair:', parseError.message);
+                logs = this._tryRepairJson(content);
+            }
+
+            return {
+                id: message.id,
+                type: 'WORKFLOW_LOG_CONTENT',
+                timestamp: Date.now(),
+                payload: { workspaceId, logs }
+            };
+        } catch (error) {
+            if (error.code === 'ENOENT') {
+                return {
+                    id: message.id,
+                    type: 'WORKFLOW_LOG_CONTENT',
+                    timestamp: Date.now(),
+                    payload: { workspaceId, logs: [] }
+                };
+            }
+            throw new Error(`Failed to read workflow log: ${error.message}`);
+        }
+    }
+
+    /**
+     * 尝试修复损坏的 JSON
+     * @private
+     */
+    _tryRepairJson(content) {
+        // 策略：找到最后一个闭合的 ] 作为数组结束
+        // 从文件末尾开始搜索，定位到完整的 JSON 数组
+        const lines = content.split('\n');
+        let validJson = [];
+        let current = [];
+        let braceCount = 0;
+        let bracketCount = 0;
+        let inString = false;
+        let escapeNext = false;
+
+        for (const line of lines) {
+            for (let i = 0; i < line.length; i++) {
+                const char = line[i];
+
+                if (escapeNext) {
+                    escapeNext = false;
+                    continue;
+                }
+                if (char === '\\' && inString) {
+                    escapeNext = true;
+                    continue;
+                }
+                if (char === '"') {
+                    inString = !inString;
+                    continue;
+                }
+
+                if (!inString) {
+                    if (char === '{') braceCount++;
+                    else if (char === '}') braceCount--;
+                    else if (char === '[') bracketCount++;
+                    else if (char === ']') bracketCount--;
+                }
+            }
+
+            // 尝试解析当前累积的行
+            try {
+                const testJson = JSON.parse(current.join('\n'));
+                if (Array.isArray(testJson)) {
+                    validJson = testJson;
+                }
+            } catch {
+                // 当前不完整，继续累积
+            }
+
+            current.push(line);
+        }
+
+        // 如果无法修复，返回空数组
+        if (validJson.length === 0) {
+            console.warn('[MessageHandler] Could not repair JSON, returning empty array');
+            return [];
+        }
+
+        console.log(`[MessageHandler] Repaired JSON, recovered ${validJson.length} entries`);
+        return validJson;
+    }
+
     // ============ 辅助方法 ============
 
     /**
@@ -503,6 +615,64 @@ export default class MessageHandler {
             // scope.json 可能不存在或读取失败，不影响工作区显示
         }
 
+        // 读取 workflow.json 获取当前状态
+        let workflowStatus = null;
+        try {
+            const workflowPath = join(workspacePath, 'logs', 'workflow.json');
+            const workflowContent = await readFile(workflowPath, 'utf-8');
+            const workflowLogs = JSON.parse(workflowContent);
+
+            // 从 workflow.json 推断当前状态
+            // 查找最后一个 stage_change 或 step_started 等事件
+            let currentStage = 'idle';
+            let isRunning = false;
+            let awaitingUserInput = false;
+
+            for (let i = workflowLogs.length - 1; i >= 0; i--) {
+                const log = workflowLogs[i];
+                if (log.type === 'stage_change') {
+                    currentStage = log.to;
+                    break;
+                }
+                if (log.type === 'plan_generated') {
+                    currentStage = 'planning';
+                    break;
+                }
+                if (log.type === 'step_started') {
+                    currentStage = 'executing';
+                    break;
+                }
+            }
+
+            // 检查是否有未完成的 user_answer（等待用户输入）
+            const lastUserInput = workflowLogs.filter(l => l.type === 'user_input' || l.type === 'user_answer');
+            const lastAgentQuestion = workflowLogs.filter(l => l.type === 'agent_question');
+
+            if (lastAgentQuestion.length > lastUserInput.length) {
+                awaitingUserInput = true;
+            }
+
+            // 检查最后一个 step_started 是否有对应的 step_completed
+            const stepStarts = workflowLogs.filter(l => l.type === 'step_started');
+            const stepCompletes = workflowLogs.filter(l => l.type === 'step_completed');
+
+            // 如果有 step_started 但没有对应数量的 step_completed，说明还在运行
+            isRunning = stepStarts.length > stepCompletes.length;
+
+            // 如果有 agent_question 未回答，也在运行
+            if (awaitingUserInput) {
+                isRunning = true;
+            }
+
+            workflowStatus = {
+                stage: currentStage,
+                isRunning,
+                awaitingUserInput
+            };
+        } catch (error) {
+            // workflow.json 可能不存在，不影响工作区显示
+        }
+
         const hasCharts = await this.hasFiles(workspacePath, 'charts');
         const hasReports = await this.hasFiles(workspacePath, 'reports');
         const hasLogs = await this.hasFiles(workspacePath, 'logs');
@@ -516,7 +686,8 @@ export default class MessageHandler {
             hasCharts,
             hasReports,
             hasLogs,
-            scope
+            scope,
+            workflowStatus
         };
     }
 
