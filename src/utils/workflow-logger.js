@@ -229,12 +229,14 @@ class WorkflowLogger {
      * 记录步骤开始
      * @param {number} stepIndex - 步骤索引
      * @param {string} stepName - 步骤名称
+     * @param {string} stepId - 步骤ID (如 step_1)
      */
-    async logStepStart(stepIndex, stepName) {
+    async logStepStart(stepIndex, stepName, stepId) {
         const entry = {
             type: 'step_started',
             stepIndex: stepIndex,
             stepName: stepName,
+            step_id: stepId,
             timestamp: new Date().toISOString()
         };
         await this._appendEntry(entry);
@@ -245,12 +247,14 @@ class WorkflowLogger {
      * @param {number} stepIndex - 步骤索引
      * @param {string} stepName - 步骤名称
      * @param {object} result - 步骤结果摘要
+     * @param {string} stepId - 步骤ID (如 step_1)
      */
-    async logStepComplete(stepIndex, stepName, result = null) {
+    async logStepComplete(stepIndex, stepName, result = null, stepId) {
         const entry = {
             type: 'step_completed',
             stepIndex: stepIndex,
             stepName: stepName,
+            step_id: stepId,
             result: result ? {
                 success: result.success !== false,
                 hasScope: !!result.scope

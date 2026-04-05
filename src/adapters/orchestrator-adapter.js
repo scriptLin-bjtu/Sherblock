@@ -146,22 +146,28 @@ export class OrchestratorAdapter {
 
         // 步骤事件
         this.orchestrator.on('step:started', (data) => {
+            // 计算 step_id
+            const stepId = data.step?.step_id || data.step?.name || `step_${data.stepIndex + 1}`;
+
             // 记录步骤开始（包含目标信息）
-            this.workflowLogger.logStepStart(data.stepIndex, data.step?.goal || data.step?.name || `Step ${data.stepIndex}`).catch(err => {
+            this.workflowLogger.logStepStart(data.stepIndex, data.step?.goal || data.step?.name || `Step ${data.stepIndex}`, stepId).catch(err => {
                 console.error('[OrchestratorAdapter] Failed to log step start:', err);
             });
 
             emit('STEP_STARTED', {
                 workspaceId: this.workspaceId,
                 stepIndex: data.stepIndex,
+                step_id: stepId,
                 step: data.step
             });
         });
 
         this.orchestrator.on('step:completed', (data) => {
+            // 计算 step_id
+            const stepId = data.step?.step_id || data.step?.name || `step_${data.stepIndex + 1}`;
             // 记录步骤完成
             const stepName = data.step?.goal || data.step?.name || `Step ${data.stepIndex}`;
-            this.workflowLogger.logStepComplete(data.stepIndex, stepName, data.result).catch(err => {
+            this.workflowLogger.logStepComplete(data.stepIndex, stepName, data.result, stepId).catch(err => {
                 console.error('[OrchestratorAdapter] Failed to log step complete:', err);
             });
 
@@ -192,7 +198,7 @@ export class OrchestratorAdapter {
             // 记录执行统计
             if (data.result?.stats) {
                 this.workflowLogger.logAgentMessage('ExecuteAgent',
-                    `步骤执行完成 - 状态: ${data.result.status}, 技能调用: ${data.result.stats.totalSkillCalls || 0}, 迭代次数: ${data.result.stats.totalIterations || 0}`,
+                    `Step completed - Status: ${data.result.status}, Skill calls: ${data.result.stats.totalSkillCalls || 0}, Iterations: ${data.result.stats.totalIterations || 0}`,
                     'EXECUTING').catch(err => {
                     console.error('[OrchestratorAdapter] Failed to log step summary:', err);
                 });
@@ -201,6 +207,7 @@ export class OrchestratorAdapter {
             emit('STEP_COMPLETED', {
                 workspaceId: this.workspaceId,
                 stepIndex: data.stepIndex,
+                step_id: stepId,
                 result: data.result
             });
 

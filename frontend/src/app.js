@@ -96,6 +96,9 @@ const state = {
     dagNodeStatuses: {}, // { stepId: "pending" | "running" | "completed" }
     dagFloatingVisible: false, // Whether floating DAG is visible
     dagCollapsed: false, // Whether DAG is collapsed
+    dagViewTransform: { x: 0, y: 0, scale: 1 }, // Viewport transform state
+    dagMinScale: 0.1, // Min zoom scale
+    dagMaxScale: 3, // Max zoom scale
 };
 
 /**
@@ -355,7 +358,28 @@ function addStyles() {
       font-size: 12px;
       color: #737373;
       display: flex;
+      align-items: center;
       gap: 8px;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      flex-shrink: 0;
+      margin-left: 8px;
+    }
+
+    .status-badge.completed {
+      background-color: #389e0d;
+      color: #fff;
+    }
+
+    .status-badge.running {
+      background-color: #096dd9;
+      color: #fff;
     }
 
     .workspace-item {
@@ -871,14 +895,37 @@ function addStyles() {
       position: fixed;
       right: 20px;
       bottom: 20px;
-      width: 380px;
-      max-height: 350px;
+      width: 420px;
+      max-height: 420px;
       background: #1e1e1e;
       border: 1px solid #3b82f6;
       border-radius: 8px;
       z-index: 1000;
       box-shadow: 0 4px 20px rgba(0,0,0,0.5);
       overflow: hidden;
+    }
+
+    .dag-floating-viewport {
+      width: 100%;
+      height: 280px;
+      overflow: hidden;
+      background: #0d0d0d;
+      border-radius: 4px;
+    }
+
+    .dag-floating-canvas {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .dag-floating-canvas svg {
+      max-width: 100%;
+      max-height: 100%;
+      width: auto;
+      height: auto;
     }
 
     .dag-floating-header {
@@ -920,15 +967,15 @@ function addStyles() {
     }
 
     .dag-floating-body {
-      padding: 10px;
-      overflow: auto;
-      max-height: 280px;
+      padding: 0;
+      overflow: hidden;
+      max-height: 350px;
       transition: max-height 0.3s ease, padding 0.3s ease;
     }
 
     .dag-floating-body.collapsed {
       max-height: 0;
-      padding: 0 10px;
+      padding: 0;
       overflow: hidden;
     }
 
@@ -992,6 +1039,64 @@ function addStyles() {
       color: #e5e5e5;
     }
 
+    .preview-btn {
+      padding: 2px 10px;
+      height: 24px;
+      border: 1px solid #404040;
+      border-radius: 4px;
+      background: #262626;
+      color: #a3a3a3;
+      font-size: 11px;
+      cursor: pointer;
+      margin-left: 10px;
+      transition: all 0.2s;
+    }
+
+    .preview-btn:hover {
+      background: #404040;
+      color: #e5e5e5;
+    }
+
+    .scope-preview-modal {
+      width: 80vw;
+      max-width: 900px;
+      max-height: 80vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .scope-preview-content {
+      flex: 1;
+      overflow: auto;
+      padding: 20px;
+      background: #1a1a1a;
+      border-radius: 0 0 8px 8px;
+    }
+
+    .scope-preview-content pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #e5e5e5;
+    }
+
+    .log-preview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #333;
+    }
+
+    .log-preview-time {
+      color: #737373;
+      font-size: 12px;
+    }
+
     .dag-preview-overlay {
       position: fixed;
       top: 0;
@@ -1012,10 +1117,14 @@ function addStyles() {
     .dag-preview-modal {
       background: #171717;
       border-radius: 12px;
-      padding: 16px;
-      max-width: 90vw;
-      max-height: 90vh;
-      overflow: auto;
+      width: 90vw;
+      height: 90vh;
+      max-width: none;
+      max-height: none;
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+      overflow: hidden;
       position: relative;
     }
 
@@ -1043,6 +1152,67 @@ function addStyles() {
     }
 
     .dag-preview-svg {
+      display: block;
+    }
+
+    /* DAG Preview Toolbar */
+    .dag-preview-toolbar {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      background: #262626;
+      border-bottom: 1px solid #3a3a3a;
+      align-items: center;
+    }
+
+    .dag-toolbar-btn {
+      width: 36px;
+      height: 36px;
+      border: 1px solid #3a3a3a;
+      border-radius: 6px;
+      background: #1e1e1e;
+      color: #e5e5e5;
+      font-size: 18px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .dag-toolbar-btn:hover {
+      background: #3a3a3a;
+      border-color: #3b82f6;
+    }
+
+    .dag-zoom-level {
+      color: #a0a0a0;
+      font-size: 13px;
+      margin-left: 12px;
+    }
+
+    .dag-preview-viewport-wrapper {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* DAG Viewport */
+    .dag-viewport {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0d0d0d;
+      cursor: grab;
+      position: relative;
+    }
+
+    .dag-canvas {
+      transform-origin: 0 0;
+      will-change: transform;
+    }
+
+    .dag-canvas svg {
       display: block;
     }
 
@@ -1712,6 +1882,136 @@ function addStyles() {
       to { transform: rotate(360deg); }
     }
 
+    /* Loading indicator animations */
+    @keyframes waiting-pulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+
+    @keyframes stage-switch {
+      0% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.1); opacity: 0.8; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    @keyframes step-running {
+      0% { width: 0%; }
+      50% { width: 70%; }
+      100% { width: 100%; }
+    }
+
+    @keyframes skill-rotating {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes plan-wave {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-5px); }
+    }
+
+    @keyframes completion-celebrate {
+      0% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.2); opacity: 0.8; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    /* Loading indicator styles */
+    .loading-indicator {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      border-radius: 10px;
+      margin: 12px 0;
+      font-size: 13px;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .loading-indicator.waiting-input {
+      background: #1e3a5f;
+      color: #93c5fd;
+      border: 1px solid #3b82f6;
+    }
+
+    .loading-indicator.waiting-input .spinner-icon {
+      animation: waiting-pulse 1.5s ease-in-out infinite;
+    }
+
+    .loading-indicator.stage-switching {
+      background: #3f2e0a;
+      color: #fbbf24;
+      border: 1px solid #f59e0b;
+    }
+
+    .loading-indicator.stage-switching .spinner-icon {
+      animation: stage-switch 1s ease-in-out infinite;
+    }
+
+    .loading-indicator.step-running {
+      background: #1e293b;
+      color: #60a5fa;
+      border: 1px solid #3b82f6;
+    }
+
+    .loading-indicator.skill-calling {
+      background: #2e1a4a;
+      color: #a78bfa;
+      border: 1px solid #8b5cf6;
+    }
+
+    .loading-indicator.skill-calling .spinner-icon {
+      animation: skill-rotating 2s linear infinite;
+    }
+
+    .loading-indicator.plan-generating {
+      background: #1a2e2a;
+      color: #34d399;
+      border: 1px solid #10b981;
+    }
+
+    .loading-indicator.plan-generating .spinner-icon {
+      animation: plan-wave 1s ease-in-out infinite;
+    }
+
+    .loading-indicator.workflow-completed {
+      background: #064e3b;
+      color: #34d399;
+      border: 1px solid #10b981;
+    }
+
+    .loading-indicator.workflow-completed .spinner-icon {
+      animation: completion-celebrate 1s ease-in-out;
+    }
+
+    .loading-indicator .spinner-icon {
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .loading-indicator .progress-bar {
+      height: 4px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 2px;
+      overflow: hidden;
+      flex: 1;
+      margin-left: 8px;
+    }
+
+    .loading-indicator .progress-fill {
+      height: 100%;
+      background: currentColor;
+      animation: step-running 2s ease-in-out infinite;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
     /* API key dialog */
     .api-key-form {
       display: flex;
@@ -2202,6 +2502,16 @@ function renderMessages() {
         container.innerHTML = state.workflowLogs
             .map((log) => renderWorkflowLogItem(log))
             .join("");
+
+        // Detect loading state based on latest message
+        const latestLog = state.workflowLogs[state.workflowLogs.length - 1];
+        const loadingState = detectLoadingState(latestLog);
+
+        // Add loading indicator if needed
+        if (loadingState) {
+            container.innerHTML += renderLoadingIndicator(loadingState);
+        }
+
         container.scrollTop = container.scrollHeight;
         initDAGInteractions();
 
@@ -2449,18 +2759,22 @@ function renderWorkflowLogItem(log) {
             icon = renderIcon("CaretRightOutlined");
             className += " system";
             const startedStepName = log.stepName || log.step_name || "";
+            // 优先使用 step_id 匹配节点，其次使用 stepName
+            const startedStepId = log.step_id || "";
             content = `<span class="step-info">Step Started:</span>${escapeHtml(startedStepName)}`;
             // Update DAG node status to running
-            updateDAGNodeStatus(startedStepName, "running");
+            updateDAGNodeStatus(startedStepId || startedStepName, "running");
             break;
 
         case "step_completed":
             icon = renderIcon("CheckCircleOutlined");
             className += " system";
             const completedStepName = log.stepName || log.step_name || "";
+            // 优先使用 step_id 匹配节点，其次使用 stepName
+            const completedStepId = log.step_id || "";
             content = `<span class="step-info">Step Completed:</span>${escapeHtml(completedStepName)}`;
             // Update DAG node status to completed
-            updateDAGNodeStatus(completedStepName, "completed");
+            updateDAGNodeStatus(completedStepId || completedStepName, "completed");
             break;
 
         case "error":
@@ -2543,6 +2857,102 @@ function renderWorkflowLogItem(log) {
       </div>
     </div>
   `;
+}
+
+/**
+ * Detect loading state based on latest message type
+ * @param {object} latestLog - Latest workflow log entry
+ * @returns {object|null} Loading state object or null
+ */
+function detectLoadingState(latestLog) {
+    if (!latestLog) return null;
+
+    // Don't show loading indicator if workflow is completed
+    if (latestLog.type === "workflow_completed") {
+        return null;
+    }
+
+    switch (latestLog.type) {
+        case "agent_question":
+            return {
+                type: "waiting-input",
+                message: "Waiting for your input...",
+                icon: "QuestionCircleOutlined"
+            };
+
+        case "stage_change":
+            return {
+                type: "stage-switching",
+                message: `Switching stage: ${latestLog.from} → ${latestLog.to}`,
+                icon: "FlagOutlined"
+            };
+
+        case "step_started":
+            return {
+                type: "step-running",
+                message: `Executing step: ${latestLog.stepName || latestLog.step_name || "Processing..."}`,
+                icon: "LoadingOutlined"
+            };
+
+        case "skill_call":
+            return {
+                type: "skill-calling",
+                message: `Calling skill: ${latestLog.skill}`,
+                icon: "ToolOutlined"
+            };
+
+        case "plan_generated":
+            return {
+                type: "plan-generating",
+                message: "Generating analysis plan...",
+                icon: "FileTextOutlined"
+            };
+
+        default:
+            // Show default loading if analyzing
+            if (state.isAnalyzing) {
+                return {
+                    type: "step-running",
+                    message: "Processing...",
+                    icon: "LoadingOutlined"
+                };
+            }
+            return null;
+    }
+}
+
+/**
+ * Render loading indicator based on current state
+ * @param {object} loadingState - Loading state object
+ * @returns {string} HTML string for loading indicator
+ */
+function renderLoadingIndicator(loadingState) {
+    const iconSvg = renderIcon(loadingState.icon);
+
+    let extraContent = "";
+
+    switch (loadingState.type) {
+        case "step-running":
+        case "plan-generating":
+            extraContent = `
+                <div class="progress-bar">
+                    <div class="progress-fill"></div>
+                </div>
+            `;
+            break;
+
+        case "workflow-completed":
+            extraContent = `<span style="margin-left: 8px;">🎉</span>`;
+            break;
+    }
+
+    return `
+        <div class="loading-indicator ${loadingState.type}">
+            <span class="spinner-icon">${iconSvg}</span>
+            <span>${loadingState.message}</span>
+            ${extraContent}
+        </div>
+    `;
 }
 
 /**
@@ -2799,7 +3209,7 @@ function generateSVG(nodes, edges, options, nodeStatuses = {}) {
     const maxX = Math.max(...nodeValues.map((n) => n.x)) + nodeWidth + 40;
     const maxY = Math.max(...nodeValues.map((n) => n.y)) + nodeHeight + 40;
 
-    let svg = `<svg class="dag-svg" viewBox="0 0 ${maxX} ${maxY}" preserveAspectRatio="xMidYMid meet">
+    let svg = `<svg class="dag-svg" width="${maxX}" height="${maxY}" style="display:block;">
     <defs>
       <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
         <polygon points="0 0, 10 3.5, 0 7" fill="#525252"/>
@@ -2820,6 +3230,66 @@ function generateSVG(nodes, edges, options, nodeStatuses = {}) {
 
     svg += "</svg>";
     return svg;
+}
+
+/**
+ * Calculate DAG bounding box and optimal scale to fit container
+ * @param {Object} nodes - Positioned nodes
+ * @param {number} containerWidth - Container width
+ * @param {number} containerHeight - Container height
+ * @returns {Object} - { width, height, scale, x, y }
+ */
+function calculateDAGScale(nodes, containerWidth, containerHeight) {
+    const nodeValues = Object.values(nodes);
+    if (nodeValues.length === 0) {
+        return { width: containerWidth, height: containerHeight, scale: 1, x: 0, y: 0 };
+    }
+
+    const nodeWidth = 220;
+    const nodeHeight = 90;
+    const padding = 40;
+
+    // Calculate actual DAG dimensions
+    const dagWidth = Math.max(...nodeValues.map((n) => n.x)) + nodeWidth + padding * 2;
+    const dagHeight = Math.max(...nodeValues.map((n) => n.y)) + nodeHeight + padding * 2;
+
+    // Calculate scale to fit container - always scale to fit (放大或缩小)
+    const scaleX = (containerWidth - padding * 2) / dagWidth;
+    const scaleY = (containerHeight - padding * 2) / dagHeight;
+    const scale = Math.min(scaleX, scaleY); // 总是缩放到适应容器
+
+    return {
+        width: dagWidth,
+        height: dagHeight,
+        scale: Math.max(scale, 0.1), // Min scale 10%
+        x: (containerWidth - dagWidth * scale) / 2,
+        y: (containerHeight - dagHeight * scale) / 2,
+    };
+}
+
+/**
+ * Generate SVG with scaling transform for mini map display
+ * @param {Object} nodes - Positioned nodes
+ * @param {Array} edges - Edge arrays
+ * @param {Object} nodeStatuses - Node status map
+ * @param {number} containerWidth - Container width for scaling
+ * @param {number} containerHeight - Container height for scaling
+ * @returns {string} - HTML string with scaled SVG
+ */
+function generateScaledSVG(nodes, edges, nodeStatuses, containerWidth, containerHeight) {
+    const scaleInfo = calculateDAGScale(nodes, containerWidth, containerHeight);
+    const svgContent = generateSVG(nodes, edges, {}, nodeStatuses);
+
+    // Extract SVG and modify to fit container using viewBox
+    const svgMatch = svgContent.match(/<svg[^>]*>/);
+    if (!svgMatch) return svgContent;
+
+    const svgTag = svgMatch[0];
+    // Use viewBox for automatic scaling - set viewBox to DAG dimensions
+    // and set width/height to container dimensions
+    const newSvgTag = `<svg class="dag-svg" width="${containerWidth}" height="${containerHeight}" viewBox="0 0 ${scaleInfo.width} ${scaleInfo.height}" style="display:block;">`;
+
+    return svgContent.replace(svgTag, newSvgTag);
 }
 
 /**
@@ -2866,13 +3336,29 @@ function renderDAGVisualization(log) {
     state.dagLayoutEdges = layoutEdges;
     state.dagFloatingVisible = true;
 
-    // Return original inline DAG with preview button (for message list display)
-    return `<div class="dag-container" data-dag-svg='${encodeURIComponent(generateSVG(positionedNodes, layoutEdges, {}, state.dagNodeStatuses))}'>
-    <div class="dag-controls">
-      <button class="dag-preview-btn" data-action="preview">Preview</button>
-    </div>
-    <div class="dag-scroll-area">
-      ${generateSVG(positionedNodes, layoutEdges, {}, state.dagNodeStatuses)}
+    // Calculate scale to fit message container width
+    const nodeValues = Object.values(positionedNodes);
+    const nodeWidth = 220, nodeHeight = 90;
+    const maxCol = Math.max(...nodeValues.map((n) => n.layer || 0)) + 1;
+    const maxRow = Math.max(...nodeValues.map((n) => {
+        const layerNodes = nodeValues.filter(nd => (nd.layer || 0) === (n.layer || 0));
+        return layerNodes.indexOf(n);
+    }), 0) + 1;
+
+    const dagWidth = maxCol * nodeWidth + (maxCol - 1) * 80 + 80;
+    const dagHeight = maxRow * nodeHeight + (maxRow - 1) * 20 + 80;
+
+    // Use a reasonable container width estimate for message area
+    const containerWidth = 600;
+    const scale = Math.min(1, containerWidth / dagWidth);
+
+    // Generate scaled SVG for message bar display
+    const scaledSvg = generateScaledSVG(positionedNodes, layoutEdges, state.dagNodeStatuses, containerWidth, dagHeight);
+
+    // Return inline DAG - click to open preview modal (for message list display)
+    return `<div class="dag-container" onclick="showDAGPreview()" data-dag-svg='${encodeURIComponent(generateSVG(positionedNodes, layoutEdges, {}, state.dagNodeStatuses))}'>
+    <div class="dag-scroll-area" style="overflow: hidden;">
+      ${scaledSvg}
     </div>
   </div>`;
 }
@@ -2884,31 +3370,166 @@ function renderDAGVisualization(log) {
  * @returns {string} - HTML string
  */
 function renderDAGFloatingContainer(positionedNodes, layoutEdges) {
-    const svg = generateSVG(positionedNodes, layoutEdges, {}, state.dagNodeStatuses);
+    // Generate scaled SVG to fit floating container (420x280 minus header ~40px = 240px height)
+    const floatingWidth = 400;
+    const floatingHeight = 230;
+    const svg = generateScaledSVG(positionedNodes, layoutEdges, state.dagNodeStatuses, floatingWidth, floatingHeight);
     const collapsedClass = state.dagCollapsed ? "collapsed" : "";
     const collapseIcon = state.dagCollapsed ? "▶" : "▼";
     const collapseTitle = state.dagCollapsed ? "Expand" : "Collapse";
     const stepCount = Object.keys(positionedNodes).length;
     const completedCount = Object.values(state.dagNodeStatuses).filter(s => s === "completed").length;
 
-    return `<div class="dag-floating-container" id="dag-floating">
+    return `<div class="dag-floating-container" id="dag-floating" onclick="showDAGPreview()">
     <div class="dag-floating-header">
       <span>📋 Execution Plan (${completedCount}/${stepCount} completed)</span>
       <div class="dag-floating-controls">
-        <button class="dag-floating-preview-btn" onclick="showDAGPreview()" title="Preview">Preview</button>
-        <button class="dag-floating-collapse-btn" onclick="toggleDAGCollapse()" title="${collapseTitle}">${collapseIcon}</button>
+        <button class="dag-floating-collapse-btn" onclick="toggleDAGCollapse(); event.stopPropagation();" title="${collapseTitle}">${collapseIcon}</button>
       </div>
     </div>
     <div class="dag-floating-body ${collapsedClass}">
-      <div class="dag-scroll-area">
-        ${svg}
+      <div class="dag-floating-viewport">
+        <div class="dag-floating-canvas">
+          ${svg}
+        </div>
       </div>
     </div>
   </div>`;
 }
 
 /**
- * Show DAG preview in modal
+ * Create DAG viewport HTML with transform support
+ * @param {string} svgContent - SVG string
+ * @param {Object} transform - Transform state {x, y, scale}
+ * @returns {string} - HTML string
+ */
+function createDAGViewport(svgContent, transform) {
+    return `<div class="dag-viewport" data-transform='${JSON.stringify(transform)}'>
+    <div class="dag-canvas" style="transform: translate(${transform.x}px, ${transform.y}px) scale(${transform.scale});">
+        ${svgContent}
+    </div>
+</div>`;
+}
+
+/**
+ * Initialize viewport drag and zoom interactions
+ * @param {HTMLElement} viewport - Viewport element
+ * @returns {Object} - Viewport API
+ */
+function initDAGViewportInteractions(viewport) {
+    const canvas = viewport.querySelector('.dag-canvas');
+    const transform = {
+        x: state.dagViewTransform?.x || 0,
+        y: state.dagViewTransform?.y || 0,
+        scale: state.dagViewTransform?.scale || 1,
+        minScale: state.dagMinScale || 0.1,
+        maxScale: state.dagMaxScale || 3
+    };
+
+    let isDragging = false;
+    let startX, startY;
+    let rafId = null;
+
+    function updateTransform() {
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(() => {
+            canvas.style.transform = `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`;
+        });
+    }
+
+    // Mouse down - start drag
+    viewport.addEventListener('mousedown', (e) => {
+        if (e.target.closest('.dag-node')) return;
+        isDragging = true;
+        startX = e.clientX - transform.x;
+        startY = e.clientY - transform.y;
+        viewport.style.cursor = 'grabbing';
+    });
+
+    // Mouse move - dragging
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        transform.x = e.clientX - startX;
+        transform.y = e.clientY - startY;
+        updateTransform();
+    });
+
+    // Mouse up - end drag
+    document.addEventListener('mouseup', () => {
+        isDragging = false;
+        viewport.style.cursor = 'grab';
+    });
+
+    // Wheel zoom
+    viewport.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const rect = viewport.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const delta = e.deltaY > 0 ? 0.9 : 1.1;
+        const newScale = Math.min(transform.maxScale, Math.max(transform.minScale, transform.scale * delta));
+
+        // Zoom centered on mouse position
+        transform.x = mouseX - (mouseX - transform.x) * (newScale / transform.scale);
+        transform.y = mouseY - (mouseY - transform.y) * (newScale / transform.scale);
+        transform.scale = newScale;
+
+        updateTransform();
+
+        // Dispatch event for zoom level display
+        viewport.dispatchEvent(new CustomEvent('dag-zoom-change', { detail: transform }));
+    }, { passive: false });
+
+    // Save transform to state
+    function saveState() {
+        state.dagViewTransform = { x: transform.x, y: transform.y, scale: transform.scale };
+    }
+
+    return {
+        getTransform: () => ({ ...transform }),
+        setTransform: (t) => { Object.assign(transform, t); updateTransform(); saveState(); },
+        zoomIn: () => {
+            transform.scale = Math.min(transform.maxScale, transform.scale * 1.2);
+            updateTransform();
+            saveState();
+            viewport.dispatchEvent(new CustomEvent('dag-zoom-change', { detail: transform }));
+        },
+        zoomOut: () => {
+            transform.scale = Math.max(transform.minScale, transform.scale / 1.2);
+            updateTransform();
+            saveState();
+            viewport.dispatchEvent(new CustomEvent('dag-zoom-change', { detail: transform }));
+        },
+        fitToWindow: () => {
+            const svgEl = canvas.querySelector('svg');
+            if (!svgEl) return;
+            const svgWidth = parseFloat(svgEl.getAttribute('width'));
+            const svgHeight = parseFloat(svgEl.getAttribute('height'));
+            const rect = viewport.getBoundingClientRect();
+            const padding = 60;
+            const scaleX = (rect.width - padding * 2) / svgWidth;
+            const scaleY = (rect.height - padding * 2) / svgHeight;
+            transform.scale = Math.min(scaleX, scaleY, 1);
+            transform.x = (rect.width - svgWidth * transform.scale) / 2;
+            transform.y = (rect.height - svgHeight * transform.scale) / 2;
+            updateTransform();
+            saveState();
+            viewport.dispatchEvent(new CustomEvent('dag-zoom-change', { detail: transform }));
+        },
+        reset: () => {
+            transform.x = 0;
+            transform.y = 0;
+            transform.scale = 1;
+            updateTransform();
+            saveState();
+            viewport.dispatchEvent(new CustomEvent('dag-zoom-change', { detail: transform }));
+        }
+    };
+}
+
+/**
+ * Show DAG preview in modal with drag and zoom support
  */
 function showDAGPreview() {
     if (!state.dagPositionedNodes || !state.dagLayoutEdges) {
@@ -2922,37 +3543,99 @@ function showDAGPreview() {
     }
 
     const svg = generateSVG(state.dagPositionedNodes, state.dagLayoutEdges, {}, state.dagNodeStatuses);
+    const transform = state.dagViewTransform || { x: 0, y: 0, scale: 1 };
+    const viewportHtml = createDAGViewport(svg, transform);
 
-    // Create overlay - same style as message list preview
+    // Create overlay with toolbar
     const overlay = document.createElement("div");
     overlay.className = "dag-preview-overlay";
     overlay.innerHTML = `
     <div class="dag-preview-modal">
+      <div class="dag-preview-toolbar">
+        <button class="dag-toolbar-btn" data-action="zoom-in" title="放大">+</button>
+        <button class="dag-toolbar-btn" data-action="zoom-out" title="缩小">−</button>
+        <button class="dag-toolbar-btn" data-action="fit" title="适应窗口">⊡</button>
+        <button class="dag-toolbar-btn" data-action="reset" title="重置">⟲</button>
+        <span class="dag-zoom-level">${Math.round(transform.scale * 100)}%</span>
+      </div>
+      <div class="dag-preview-viewport-wrapper">
+        ${viewportHtml}
+      </div>
       <button class="dag-preview-close">&times;</button>
-      ${svg}
     </div>
   `;
     document.body.appendChild(overlay);
 
-    // Adjust SVG for preview (same as message list)
-    const svgElement = overlay.querySelector(".dag-svg");
-    if (svgElement) {
-        svgElement.classList.add("dag-preview-svg");
-        const viewBox = svgElement.viewBox.baseVal;
-        if (viewBox.width && viewBox.height) {
-            const aspect = viewBox.width / viewBox.height;
-            if (aspect > 1) {
-                svgElement.style.width = "80vw";
-                svgElement.style.height = "auto";
-            } else {
-                svgElement.style.height = "80vh";
-                svgElement.style.width = "auto";
+    // Initialize viewport interactions
+    const viewport = overlay.querySelector(".dag-viewport");
+    const viewportAPI = initDAGViewportInteractions(viewport);
+
+    // Auto-fit to window when preview opens
+    viewportAPI.fitToWindow();
+
+    // Zoom level display update
+    const zoomLevelEl = overlay.querySelector('.dag-zoom-level');
+    viewport.addEventListener('dag-zoom-change', (e) => {
+        zoomLevelEl.textContent = Math.round(e.detail.scale * 100) + '%';
+    });
+
+    // Toolbar button handlers
+    overlay.querySelectorAll('.dag-toolbar-btn').forEach(btn => {
+        btn.onclick = () => {
+            const action = btn.dataset.action;
+            switch(action) {
+                case 'zoom-in': viewportAPI.zoomIn(); break;
+                case 'zoom-out': viewportAPI.zoomOut(); break;
+                case 'fit': viewportAPI.fitToWindow(); break;
+                case 'reset': viewportAPI.reset(); break;
             }
-        }
-    }
+        };
+    });
 
     // Re-attach node click handlers for preview
     initDAGNodeClick(overlay);
+
+    // Close handler - save state
+    const saveAndClose = () => {
+        state.dagViewTransform = viewportAPI.getTransform();
+        overlay.remove();
+    };
+    overlay.querySelector(".dag-preview-close").onclick = saveAndClose;
+    overlay.onclick = (e) => {
+        if (e.target === overlay) saveAndClose();
+    };
+}
+
+window.showDAGPreview = showDAGPreview;
+
+/**
+ * Show Scope preview in modal
+ */
+function showScopePreview() {
+    if (!state.scope) {
+        return;
+    }
+
+    // Remove existing overlay
+    const existingOverlay = document.querySelector(".dag-preview-overlay");
+    if (existingOverlay) {
+        existingOverlay.remove();
+    }
+
+    const scopeJson = JSON.stringify(state.scope, null, 2);
+
+    // Create overlay
+    const overlay = document.createElement("div");
+    overlay.className = "dag-preview-overlay";
+    overlay.innerHTML = `
+    <div class="dag-preview-modal scope-preview-modal">
+      <button class="dag-preview-close">&times;</button>
+      <div class="scope-preview-content">
+        <pre>${escapeHtml(scopeJson)}</pre>
+      </div>
+    </div>
+  `;
+    document.body.appendChild(overlay);
 
     // Close handler
     overlay.querySelector(".dag-preview-close").onclick = () => overlay.remove();
@@ -2961,7 +3644,53 @@ function showDAGPreview() {
     };
 }
 
-window.showDAGPreview = showDAGPreview;
+window.showScopePreview = showScopePreview;
+
+/**
+ * Show Log preview in modal
+ */
+function showLogPreview(logIndex) {
+    const log = state.logs[logIndex];
+    if (!log) {
+        return;
+    }
+
+    // Remove existing overlay
+    const existingOverlay = document.querySelector(".dag-preview-overlay");
+    if (existingOverlay) {
+        existingOverlay.remove();
+    }
+
+    let content = log.content || 'No content available';
+    if (typeof content === 'object') {
+        content = JSON.stringify(content, null, 2);
+    }
+
+    // Create overlay
+    const overlay = document.createElement("div");
+    overlay.className = "dag-preview-overlay";
+    overlay.innerHTML = `
+    <div class="dag-preview-modal scope-preview-modal">
+      <button class="dag-preview-close">&times;</button>
+      <div class="scope-preview-content">
+        <div class="log-preview-header">
+          <strong>${escapeHtml(log.name)}</strong>
+          <span class="log-preview-time">${formatTime(log.createdAt)}</span>
+        </div>
+        <pre>${escapeHtml(content)}</pre>
+      </div>
+    </div>
+  `;
+    document.body.appendChild(overlay);
+
+    // Close handler
+    overlay.querySelector(".dag-preview-close").onclick = () => overlay.remove();
+    overlay.onclick = (e) => {
+        if (e.target === overlay) overlay.remove();
+    };
+}
+
+window.showLogPreview = showLogPreview;
 
 /**
  * Toggle DAG floating container collapse
@@ -3059,21 +3788,21 @@ function restoreDAGFromLogs(logs) {
     const startedSteps = logs.filter((log) => log.type === "step_started");
     const currentStepLog = logs.find((log) => log.type === "step_started");
 
-    // Mark completed steps
+    // Mark completed steps (优先使用 step_id)
     completedSteps.forEach((log) => {
-        const stepName = log.stepName || log.step_name;
-        const nodeId = convertStepNameToNodeId(stepName);
+        const stepId = log.step_id || log.stepName || log.step_name;
+        const nodeId = convertStepNameToNodeId(stepId);
         if (nodeId) {
             nodeStatuses[nodeId] = "completed";
         }
     });
 
-    // Mark current running step
-    const currentStepName = currentStepLog?.stepName || currentStepLog?.step_name;
-    const currentNodeId = convertStepNameToNodeId(currentStepName);
+    // Mark current running step (优先使用 step_id)
+    const currentStepId = currentStepLog?.step_id || currentStepLog?.stepName || currentStepLog?.step_name;
+    const currentNodeId = convertStepNameToNodeId(currentStepId);
     const currentStepCompleted = completedSteps.some((c) => {
-        const cStepName = c.stepName || c.step_name;
-        return convertStepNameToNodeId(cStepName) === currentNodeId;
+        const cStepId = c.step_id || c.stepName || c.step_name;
+        return convertStepNameToNodeId(cStepId) === currentNodeId;
     });
     if (currentStepLog && currentNodeId && !currentStepCompleted) {
         nodeStatuses[currentNodeId] = "running";
@@ -3342,6 +4071,9 @@ function renderWorkspaceList() {
         <div class="title">${ws.name}</div>
         <div class="meta">${formatTime(ws.createdAt)}</div>
       </div>
+      ${ws.isCompleted
+        ? '<span class="status-badge completed">Completed</span>'
+        : '<span class="status-badge running">Running</span>'}
       <button class="btn-delete" data-id="${ws.id}" title="Delete workspace">×</button>
     </div>
   `,
@@ -3477,10 +4209,10 @@ function renderScopeView(container) {
         return;
     }
 
-    // Add search box
+    // Add search box with preview button
     container.innerHTML = `
     <div class="detail-view">
-      <h4>Scope (State Variables)</h4>
+      <h4>Scope (State Variables) <button class="preview-btn" onclick="showScopePreview()">Preview</button></h4>
       <div class="search-box">
         <input type="text" id="scope-search" placeholder="Search key or value...">
         <button id="scope-search-btn">Search</button>
@@ -3889,47 +4621,11 @@ function renderLogsView(container) {
         applyLogFilter();
     });
 
-    // Click to view log content
-    const logContent = document.getElementById("log-content");
+    // Click to view log content in preview modal
     container.querySelectorAll(".log-item").forEach((item) => {
         item.addEventListener("click", () => {
             const index = item.dataset.index;
-            const log = state.logs[index];
-
-            // Show back button
-            if (!document.getElementById("back-to-logs")) {
-                const backBtn = document.createElement("button");
-                backBtn.id = "back-to-logs";
-                backBtn.className = "back-btn";
-                backBtn.innerHTML = "← Back to List";
-                backBtn.addEventListener("click", () => {
-                    document.getElementById("log-list").style.display = "flex";
-                    logContent.style.display = "none";
-                    backBtn.remove();
-                });
-                logContent.parentNode.insertBefore(backBtn, logContent);
-            }
-
-            // Hide list, show content
-            document.getElementById("log-list").style.display = "none";
-            logContent.style.display = "block";
-            logContent.innerHTML = '<div class="loading">Loading...</div>';
-
-            // Get log content
-            if (log.content) {
-                renderLogContent(logContent, log.content);
-            } else {
-                // Request log content
-                websocketService.send({
-                    type: "GET_LOG_CONTENT",
-                    payload: {
-                        workspaceId: state.selectedWorkspaceId,
-                        logName: log.name,
-                    },
-                });
-            }
-
-            state.currentLogIndex = index;
+            showLogPreview(index);
         });
     });
 }
@@ -4092,6 +4788,7 @@ function initWebSocketEvents() {
             charts: ws.hasCharts ? 1 : 0,
             reports: ws.hasReports ? 1 : 0,
             logs: ws.hasLogs ? 1 : 0,
+            isCompleted: ws.isCompleted || false,
         }));
 
         // Keep currently selected workspace (if not in new list)
@@ -4157,15 +4854,18 @@ function initWebSocketEvents() {
         }
 
         if (stage) {
+            state.stage = stage;
             updateStageIndicator(stage);
-            // Show workflow control buttons during execution
+            // Set isAnalyzing during active stages
             if (
                 stage === "executing" ||
                 stage === "planning" ||
                 stage === "collecting"
             ) {
+                state.isAnalyzing = true;
                 updateWorkflowControls("running");
             }
+            updateInputState();
         }
 
         if (typeof step === "number" && typeof totalSteps === "number") {

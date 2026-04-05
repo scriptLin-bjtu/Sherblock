@@ -267,7 +267,7 @@ export default class MessageHandler {
         const { OrchestratorAdapter } = await import('../adapters/orchestrator-adapter.js');
         const adapter = new OrchestratorAdapter(this.wsServer, workspaceId, clientId, {
             useParallelExecution: true,
-            maxParallelTasks: 3,
+            maxParallelTasks: parseInt(process.env.MAX_PARALLEL_TASKS, 10) || 3,
             continueOnFailure: true,
         });
 
@@ -617,6 +617,7 @@ export default class MessageHandler {
 
         // 读取 workflow.json 获取当前状态
         let workflowStatus = null;
+        let isCompleted = false;
         try {
             const workflowPath = join(workspacePath, 'logs', 'workflow.json');
             const workflowContent = await readFile(workflowPath, 'utf-8');
@@ -669,6 +670,10 @@ export default class MessageHandler {
                 isRunning,
                 awaitingUserInput
             };
+
+            // 检查最后一条日志是否为 workflow_completed
+            const lastLog = workflowLogs[workflowLogs.length - 1];
+            isCompleted = lastLog && lastLog.type === 'workflow_completed';
         } catch (error) {
             // workflow.json 可能不存在，不影响工作区显示
         }
@@ -687,7 +692,8 @@ export default class MessageHandler {
             hasReports,
             hasLogs,
             scope,
-            workflowStatus
+            workflowStatus,
+            isCompleted
         };
     }
 

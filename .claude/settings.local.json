@@ -30,7 +30,8 @@
       "Bash(npx vitest:*)",
       "mcp__ide__getDiagnostics",
       "Bash(findstr /n \"getCurrent\")",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(dir:*)"
     ]
   }
 }
