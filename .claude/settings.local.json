@@ -31,7 +31,15 @@
       "mcp__ide__getDiagnostics",
       "Bash(findstr /n \"getCurrent\")",
       "Bash(rm:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "WebFetch(domain:vega.github.io)",
+      "Bash(npx playwright:*)",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "mcp__plugin_playwright_playwright__browser_snapshot",
+      "mcp__plugin_playwright_playwright__browser_run_code",
+      "mcp__plugin_playwright_playwright__browser_click",
+      "mcp__plugin_playwright_playwright__browser_close",
+      "WebFetch(domain:news.ycombinator.com)"
     ]
   }
 }

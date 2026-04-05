@@ -43,7 +43,6 @@ export class WebSocketServer {
                     ws.on('message', async (data) => {
                         try {
                             const message = JSON.parse(data.toString());
-                            console.log(`[WebSocketServer] Received message: ${message.type}`);
                             const response = await this.messageHandler.handle(message, ws, clientId);
                             if (response) {
                                 ws.send(JSON.stringify(response));

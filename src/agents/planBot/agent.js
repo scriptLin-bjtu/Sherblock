@@ -172,14 +172,35 @@ function convertLegacyFormat(legacyPlan) {
 
 /**
  * Review prompt for step execution review
+ * @param {string} executionMode - 'serial' or 'parallel'
  */
-const reviewPrompt = () => `You are a plan reviewer evaluating the just-completed execution step.
+const reviewPrompt = (executionMode = 'serial') => {
+    const isParallel = executionMode === 'parallel';
+
+    const decisionOptions = isParallel
+        ? `- CONTINUE: Proceed to next step (or parallel batch)
+- MODIFY_PLAN: Modify existing plan steps (this will trigger DAG rebuild in parallel mode)
+- TERMINATE: Terminate workflow
+
+**NOTE**: In parallel execution mode, ADD_STEPS, REMOVE_STEPS, and REORDER are not supported. Use MODIFY_PLAN to modify existing steps instead.`
+        : `- CONTINUE: Proceed to next step
+- MODIFY_PLAN: Plan needs modification
+- ADD_STEPS: Add new steps
+- REMOVE_STEPS: Remove some steps
+- REORDER: Reorder steps
+- TERMINATE: Terminate workflow`;
+
+    const decisionField = isParallel
+        ? `"decision": "CONTINUE|MODIFY_PLAN|TERMINATE"`
+        : `"decision": "CONTINUE|MODIFY_PLAN|ADD_STEPS|REMOVE_STEPS|REORDER|TERMINATE"`;
+
+    return `You are a plan reviewer evaluating the just-completed execution step.
 
 Please analyze the execution results and return JSON with the following structure:
 {
   "assessment": "success|partial|failure",
   "findings": "Summary of key findings",
-  "decision": "CONTINUE|MODIFY_PLAN|ADD_STEPS|REMOVE_STEPS|REORDER|TERMINATE",
+  ${decisionField},
   "adjustments": [
     {
       "type": "add|modify|remove|reorder",
@@ -198,13 +219,8 @@ Assessment criteria:
 - failure: Step failed, criteria not met
 
 Decision options:
-- CONTINUE: Proceed to next step
-- MODIFY_PLAN: Plan needs modification
-- ADD_STEPS: Add new steps
-- REMOVE_STEPS: Remove some steps
-- REORDER: Reorder steps
-- TERMINATE: Terminate workflow
-`;
+${decisionOptions}`;
+};
 
 export class PlanAgent {
     constructor(callLLM) {
@@ -249,9 +265,10 @@ export class PlanAgent {
      * @param {Object} executionResult - 执行结果
      * @param {Object} currentScope - 当前全局状态
      * @param {Object} currentPlan - 当前计划
+     * @param {string} executionMode - 执行模式：'serial' 或 'parallel'（默认 'serial'）
      * @returns {Promise<Object>} 审查结果
      */
-    async reviewStep(step, executionResult, currentScope, currentPlan) {
+    async reviewStep(step, executionResult, currentScope, currentPlan, executionMode = 'serial') {
         const reviewData = {
             step,
             executionResult,
@@ -273,7 +290,7 @@ export class PlanAgent {
         }
 
         const res = await this.callLLM({
-            systemPrompt: reviewPrompt(),
+            systemPrompt: reviewPrompt(executionMode),
             apiKey: process.env.DEEPSEEK_API_KEY,
             user_messages: `请审查以下步骤执行结果：\n\n${JSON.stringify(reviewData, null, 2)}`,
             modelProvider: "deepseek-reasoner",

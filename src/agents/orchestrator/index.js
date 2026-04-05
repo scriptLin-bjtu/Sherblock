@@ -511,6 +511,7 @@ export class AgentOrchestrator {
         console.log(`[Orchestrator] DAG validated: ${Object.keys(nodes).length} nodes, ${edges.length} edges`);
 
         // 创建并行执行引擎
+        const executionMode = this.config.useParallelExecution ? 'parallel' : 'serial';
         const executor = new ParallelExecutionEngine(
             { ...this.workflowState.plan, nodes, edges },
             this.executeAgent,
@@ -521,6 +522,7 @@ export class AgentOrchestrator {
                 // 审查配置
                 enableReview,
                 planAgent: enableReview ? this.planAgent : null,
+                executionMode,
                 onStepStart: (nodeId, node) => {
                     this._emit("step:started", { stepIndex: node.index, step: node, nodeId });
                 },
@@ -610,6 +612,7 @@ export class AgentOrchestrator {
                     }
 
                     // 创建新的执行器
+                    const rebuildExecutionMode = this.config.useParallelExecution ? 'parallel' : 'serial';
                     currentExecutor = new ParallelExecutionEngine(
                         { ...this.workflowState.plan, nodes: currentNodes, edges: currentEdges },
                         this.executeAgent,
@@ -619,6 +622,7 @@ export class AgentOrchestrator {
                             continueOnFailure: this.config.continueOnFailure,
                             enableReview,
                             planAgent: enableReview ? this.planAgent : null,
+                            executionMode: rebuildExecutionMode,
                             onStepStart: (nodeId, node) => {
                                 this._emit("step:started", { stepIndex: node.index, step: node, nodeId });
                             },
@@ -703,12 +707,14 @@ export class AgentOrchestrator {
      * @private
      */
     async _reviewStepExecution(step, executionResult) {
+        const executionMode = this.config.useParallelExecution ? 'parallel' : 'serial';
         try {
             const reviewResult = await this.planAgent.reviewStep(
                 step,
                 executionResult,
                 this.workflowState.scope,
                 this.workflowState.plan,
+                executionMode,
             );
             return reviewResult;
         } catch (error) {

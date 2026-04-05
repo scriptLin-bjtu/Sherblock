@@ -217,88 +217,279 @@ export function createScatterChartSpec(title, series, xAxisName, yAxisName) {
 }
 
 /**
- * Create Vega-Lite spec for radar chart
+ * Create Vega spec for radar chart using polar coordinates
+ * Pre-calculates all positions to avoid signal expression issues in Node.js
  */
 export function createRadarChartSpec(title, indicators, series) {
-    // Transform data for radar chart using polar coordinates
+    const numIndicators = indicators.length;
+    const centerX = 250;
+    const centerY = 250;
+    const maxRadius = 200;
+
+    // Helper: convert polar to cartesian
+    const polarToCartesian = (radius, angleDeg) => {
+        const angleRad = (angleDeg - 90) * (Math.PI / 180);
+        return {
+            x: centerX + radius * Math.cos(angleRad),
+            y: centerY + radius * Math.sin(angleRad),
+        };
+    };
+
+    // Generate grid levels (circles at 20%, 40%, 60%, 80%, 100%)
+    const gridLevels = [];
+    for (let level = 1; level <= 5; level++) {
+        const radius = (level / 5) * maxRadius;
+        let pathD = "";
+        for (let i = 0; i <= numIndicators; i++) {
+            const angle = (i * 360) / numIndicators;
+            const pos = polarToCartesian(radius, angle);
+            pathD += (i === 0 ? "M" : "L") + pos.x + "," + pos.y;
+        }
+        pathD += "Z";
+        gridLevels.push({ path: pathD, level });
+    }
+
+    // Generate axis lines (from center to each indicator)
+    const axisLines = [];
+    for (let i = 0; i < numIndicators; i++) {
+        const angle = (i * 360) / numIndicators;
+        const start = polarToCartesian(0, angle);
+        const end = polarToCartesian(maxRadius, angle);
+        axisLines.push({
+            x1: start.x,
+            y1: start.y,
+            x2: end.x,
+            y2: end.y,
+            key: indicators[i].name,
+        });
+    }
+
+    // Generate labels
+    const labels = [];
+    for (let i = 0; i < numIndicators; i++) {
+        const angle = (i * 360) / numIndicators;
+        const pos = polarToCartesian(maxRadius + 20, angle);
+        labels.push({
+            x: pos.x,
+            y: pos.y,
+            text: indicators[i].name,
+            angle: angle,
+        });
+    }
+
+    // Generate series polygons and points
+    const seriesPolygons = [];
+    const seriesPoints = [];
+    for (const s of series) {
+        let pathD = "";
+        for (let i = 0; i < numIndicators; i++) {
+            const value = s.data[i];
+            const maxValue = indicators[i].max;
+            const normalized = (value / maxValue) * maxRadius;
+            const angle = (i * 360) / numIndicators;
+            const pos = polarToCartesian(normalized, angle);
+            pathD += (i === 0 ? "M" : "L") + pos.x + "," + pos.y;
+
+            // Add individual point data
+            seriesPoints.push({
+                x: pos.x,
+                y: pos.y,
+                value: value,
+                key: indicators[i].name,
+                series: s.name,
+            });
+        }
+        pathD += "Z";
+
+        seriesPolygons.push({
+            name: s.name,
+            path: pathD,
+        });
+    }
+
+    // Color mapping for series
+    const colorScheme = ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#b279a2", "#ff9daa", "#9d755d", "#bab0ac"];
+
+    return {
+        $schema: "https://vega.github.io/schema/vega/v5.json",
+        description: `Radar chart: ${title}`,
+        width: 500,
+        height: 500,
+        padding: 20,
+        background: "white",
+        data: [
+            { name: "grid", values: gridLevels },
+            { name: "axes", values: axisLines },
+            { name: "labels", values: labels },
+            { name: "polygons", values: seriesPolygons },
+            { name: "points", values: seriesPoints },
+        ],
+        marks: [
+            // Grid circles (background)
+            {
+                type: "path",
+                from: { data: "grid" },
+                encode: {
+                    enter: {
+                        path: { field: "path" },
+                        fill: { value: "none" },
+                        stroke: { value: "#ddd" },
+                        strokeWidth: { value: 1 },
+                    },
+                },
+            },
+            // Axis lines
+            {
+                type: "line",
+                from: { data: "axes" },
+                encode: {
+                    enter: {
+                        x1: { field: "x1" },
+                        y1: { field: "y1" },
+                        x2: { field: "x2" },
+                        y2: { field: "y2" },
+                        stroke: { value: "#ddd" },
+                        strokeWidth: { value: 1 },
+                    },
+                },
+            },
+            // Axis labels
+            {
+                type: "text",
+                from: { data: "labels" },
+                encode: {
+                    enter: {
+                        x: { field: "x" },
+                        y: { field: "y" },
+                        text: { field: "text" },
+                        align: { value: "middle" },
+                        baseline: { value: "middle" },
+                        fontSize: { value: 11 },
+                        fill: { value: "#333" },
+                    },
+                },
+            },
+            // Series polygons
+            {
+                type: "path",
+                from: { data: "polygons" },
+                encode: {
+                    enter: {
+                        path: { field: "path" },
+                        fill: { value: "transparent" },
+                        stroke: { field: "name", type: "ordinal", scale: "color" },
+                        strokeWidth: { value: 2 },
+                        fillOpacity: { value: 0.1 },
+                    },
+                },
+            },
+            // Series points
+            {
+                type: "symbol",
+                from: { data: "points" },
+                encode: {
+                    enter: {
+                        x: { field: "x" },
+                        y: { field: "y" },
+                        size: { value: 40 },
+                        fill: { field: "series", type: "ordinal", scale: "color" },
+                        stroke: { value: "white" },
+                        strokeWidth: { value: 1.5 },
+                    },
+                },
+            },
+        ],
+        scales: [
+            {
+                name: "color",
+                type: "ordinal",
+                domain: series.map((s) => s.name),
+                range: colorScheme,
+            },
+        ],
+        title: {
+            text: title,
+            anchor: "middle",
+            fontSize: 16,
+            fontWeight: "bold",
+        },
+    };
+}
+
+/**
+ * Legacy function - kept for backward compatibility but now returns polar chart
+ */
+export function createRadarChartSpecLegacy(title, indicators, series) {
+    // Use simple bar chart in polar coordinates
     const data = [];
     const numIndicators = indicators.length;
 
-    for (const s of series) {
-        for (let i = 0; i < numIndicators; i++) {
-            const angle = (2 * Math.PI * i) / numIndicators;
-            const max = indicators[i].max;
+    for (let i = 0; i < numIndicators; i++) {
+        const key = indicators[i].name;
+        const maxValue = indicators[i].max;
+        const angle = (i * 360) / numIndicators;
+
+        for (const s of series) {
             const value = s.data[i];
-            const normalized = (value / max) * 100;
-
-            // Pre-calculate trigonometric functions (Vega-Lite doesn't support radians)
-            const x = normalized * Math.cos(angle);
-            const y = normalized * Math.sin(angle);
-
             data.push({
-                x,
-                y,
-                indicator: indicators[i].name,
-                series: s.name,
+                key: key,
                 value: value,
-                angle: (i * 360) / numIndicators,
+                angle: angle,
+                series: s.name,
+                max: maxValue,
             });
         }
     }
 
     return {
         $schema: "https://vega.github.io/schema/vega-lite/v5.json",
-        width: 600,
-        height: 600,
-        title: {
-            text: title,
-            fontSize: 18,
-            anchor: "middle",
-        },
+        description: `Radar chart: ${title}`,
+        width: 500,
+        height: 500,
+        title: { text: title, fontSize: 18 },
         data: { values: data },
         encoding: {
-            x: {
-                field: "x",
+            theta: { field: "angle", type: "quantitative", stack: null },
+            radius: {
+                field: "value",
                 type: "quantitative",
-                axis: null,
-                scale: { domain: [-120, 120] },
+                scale: { type: "sqrt", domain: [0, 100] },
             },
-            y: {
-                field: "y",
-                type: "quantitative",
-                axis: null,
-                scale: { domain: [-120, 120] },
-            },
-            color: {
-                field: "series",
-                type: "nominal",
-                legend: { title: "Series" },
-            },
-            tooltip: [
-                { field: "indicator", type: "nominal", title: "Indicator" },
-                { field: "value", type: "quantitative", title: "Value" },
-            ],
+            color: { field: "series", type: "nominal" },
         },
-        mark: "line",
-        resolve: { scale: { color: "independent" } },
         layer: [
             {
-                mark: "line",
+                mark: {
+                    type: "arc",
+                    innerRadius: 20,
+                    outerRadius: 200,
+                },
             },
             {
-                mark: "circle",
-                size: 100,
+                mark: { type: "text", radius: 220 },
+                encoding: {
+                    text: { field: "key", type: "nominal" },
+                },
             },
         ],
+        view: { stroke: null },
     };
 }
 
 /**
- * Convert Vega-Lite spec to SVG string
+ * Convert Vega-Lite or Vega spec to SVG string
  */
 export async function specToSvg(spec) {
-    // Compile Vega-Lite spec to Vega spec
-    const vegaSpec = vegaLite.compile(spec).spec;
+    let vegaSpec;
+
+    // Check if it's a Vega-Lite spec (has vega-lite in $schema)
+    if (spec.$schema && spec.$schema.includes("vega-lite")) {
+        // Compile Vega-Lite spec to Vega spec
+        vegaSpec = vegaLite.compile(spec).spec;
+    } else {
+        // Already a Vega spec
+        vegaSpec = spec;
+    }
 
     // Create Vega view
     const view = new vega.View(vega.parse(vegaSpec), {

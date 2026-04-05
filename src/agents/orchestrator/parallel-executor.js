@@ -19,6 +19,7 @@ export class ParallelExecutionEngine {
         this.plan = plan;
         this.executeAgent = executeAgent;
         this.scopeManager = scopeManager;
+        this.executionMode = options.executionMode || 'parallel';
         this.options = {
             maxParallel: options.maxParallel || 3,
             continueOnFailure: options.continueOnFailure ?? false,
@@ -283,6 +284,7 @@ export class ParallelExecutionEngine {
                     executionResult,
                     currentScope,
                     this.plan,
+                    this.executionMode,
                 );
             } catch (error) {
                 return {
