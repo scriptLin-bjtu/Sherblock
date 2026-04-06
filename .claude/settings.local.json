@@ -52,7 +52,26 @@
       "Bash(set HTTP_PROXY=http://127.0.0.1:7890)",
       "Bash(set HTTPS_PROXY=http://127.0.0.1:7890)",
       "Bash(uv run:*)",
-      "Bash(python render_excalidraw.py D:/project/nodejs-project/sherblock/docs/blockchain-analysis-workflow.excalidraw)"
+      "Bash(python render_excalidraw.py D:/project/nodejs-project/sherblock/docs/blockchain-analysis-workflow.excalidraw)",
+      "Skill(latex-thesis-zh)",
+      "Bash(powershell -Command \"Expand-Archive -Path thuthesis.zip -DestinationPath . -Force\")",
+      "Bash(latex thuthesis.ins)",
+      "Bash(choco install:*)",
+      "Bash(xelatex:*)",
+      "Bash(where xelatex:*)",
+      "Bash(cp thuthesis-7.5.1/thuthesis.cls .)",
+      "Bash(cp thuthesis-7.5.1/thuthesis-*.bst .)",
+      "Bash(cp thuthesis-7.5.1/thuthesis-*.bbx .)",
+      "Bash(cp thuthesis-7.5.1/thuthesis-*.cbx .)",
+      "Bash(mpm --install=xeCJK)",
+      "Bash(mpm --list)",
+      "Bash(mpm:*)",
+      "Bash(npx @mermaid-js/mermaid-cli --version)",
+      "Bash(npx @mermaid-js/mermaid-cli -i thesis/figures/system-architecture.mmd -o thesis/figures/system-architecture.pdf)",
+      "Bash(npx @mermaid-js/mermaid-cli -i thesis/figures/question-agent-flow.mmd -o thesis/figures/question-agent-flow.pdf)",
+      "Bash(npx @mermaid-js/mermaid-cli -i thesis/figures/directory-structure.mmd -o thesis/figures/directory-structure.pdf)",
+      "Bash(npx @mermaid-js/mermaid-cli -i thesis/figures/parallel-execution.mmd -o thesis/figures/parallel-execution.pdf)",
+      "Bash(npx @mermaid-js/mermaid-cli -i thesis/figures/context-compression.mmd -o thesis/figures/context-compression.pdf)"
     ]
   }
 }
