@@ -157,7 +157,7 @@ Each task execution creates a unique workspace directory to isolate task files:
 
 ### Web Interface (Frontend)
 
-Vue.js frontend for real-time task monitoring:
+原生 JavaScript (Vanilla JS) 前端，用于实时任务监控：
 
 ```bash
 cd frontend && npm run dev
@@ -167,6 +167,7 @@ Features:
 - Real-time workspace status via WebSocket
 - Task execution progress tracking
 - View generated reports and charts
+- DAG 可视化展示并行任务执行状态
 
 ### Server System
 
@@ -212,6 +213,7 @@ Key backend dependencies:
 Frontend dependencies (in `frontend/package.json`):
 - `vite` - Build tool and dev server
 - `marked` - Markdown rendering
+- **注意**：前端使用原生 JavaScript，无 Vue.js 依赖
 
 Test dependencies:
 - `vitest` - Unit testing framework
@@ -325,13 +327,15 @@ src/
         ├── scope-coordinator.js# Thread-safe scope coordination
         └── task-scheduler.js   # Task scheduling
 
-frontend/                       # Vue.js frontend
+frontend/                       # 原生 JavaScript 前端
 ├── src/
-│   ├── main.js                # Frontend entry
-│   ├── app.js                 # Vue app component
+│   ├── main.js                # 前端入口
+│   ├── app.js                 # 主应用组件（原生 JS + SVG）
 │   └── services/
-│       └── websocket.js       # WebSocket client
-└── package.json
+│       └── websocket.js       # WebSocket 客户端
+├── index.html                 # HTML 模板
+├── vite.config.js             # Vite 配置
+└── package.json               # 前端依赖（仅 vite + marked）
 ```
 
 ## Important Implementation Details

@@ -40,7 +40,19 @@
       "mcp__plugin_playwright_playwright__browser_click",
       "mcp__plugin_playwright_playwright__browser_close",
       "WebFetch(domain:news.ycombinator.com)",
-      "Bash(xargs wc:*)"
+      "Bash(xargs wc:*)",
+      "Read(//c/Users/86182/.claude/skills/find-skills/**)",
+      "Bash(npx skills:*)",
+      "Bash(cp:*)",
+      "Bash(mkdir -p .claude/skills)",
+      "Bash(cp -r excalidraw-diagram-skill .claude/skills/excalidraw-diagram)",
+      "Bash(pip --version)",
+      "Bash(pip install:*)",
+      "Bash(python -m playwright install chromium)",
+      "Bash(set HTTP_PROXY=http://127.0.0.1:7890)",
+      "Bash(set HTTPS_PROXY=http://127.0.0.1:7890)",
+      "Bash(uv run:*)",
+      "Bash(python render_excalidraw.py D:/project/nodejs-project/sherblock/docs/blockchain-analysis-workflow.excalidraw)"
     ]
   }
 }
