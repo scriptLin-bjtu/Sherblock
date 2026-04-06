@@ -1,14 +1,21 @@
 /**
  * Context Compression System for ExecuteAgent
  *
- * Exports the adaptive compression system components.
+ * Simplified: Only LLM-based smart summarization remains
+ * No automatic truncation or field filtering
  */
 
-export { AdaptiveContextManager, CompressionTier } from "./adaptive-manager.js";
+// Main compression manager
+export { CompressionManager } from "./manager.js";
+
+// LLM-based smart summarization
 export { LLMSmartSummarizer, SmartSummary } from "./llm-summarizer.js";
-export { HistoryCompressor } from "./history-compressor.js";
-export { ScopeFilter } from "./scope-filter.js";
+
+// Configuration
 export { compressionConfig, getCompressionConfig, estimateTokens, debugLog } from "./config.js";
 
-// Default export for convenience
-export { AdaptiveContextManager as default } from "./adaptive-manager.js";
+// Adaptive compression (used by agent-v2.js, kept for compatibility)
+export { AdaptiveContextManager, CompressionTier } from "./adaptive-manager.js";
+
+// Default export
+export { CompressionManager as default } from "./manager.js";

@@ -10,7 +10,11 @@ import { PlanAgent } from "../planBot/agent.js";
 import { ExecuteAgentV2 } from "../executeBot/agent-v2.js";
 import { scopeManager } from "../../utils/scope-manager.js";
 import { workspaceManager } from "../../utils/workspace-manager.js";
-import { validateDAG, inferEdges, inferEdgesFromOutputs } from "../../utils/dag-utils.js";
+import {
+    validateDAG,
+    inferEdges,
+    inferEdgesFromOutputs,
+} from "../../utils/dag-utils.js";
 import { ParallelExecutionEngine } from "./parallel-executor.js";
 
 export { WorkflowStage } from "./state-machine.js";
@@ -22,10 +26,20 @@ export class AgentOrchestrator {
 
         // 并行执行配置
         this.config = {
-            useParallelExecution: options.useParallelExecution || process.env.USE_PARALLEL_EXECUTION === 'true',
-            maxParallelTasks: options.maxParallelTasks || parseInt(process.env.MAX_PARALLEL_TASKS, 10) || 3,
-            continueOnFailure: options.continueOnFailure ?? process.env.CONTINUE_ON_FAILURE === 'true' ?? false,
-            enableReview: options.enableReview ?? process.env.ENABLE_REVIEW_IN_PARALLEL === 'true',
+            useParallelExecution:
+                options.useParallelExecution ||
+                process.env.USE_PARALLEL_EXECUTION === "true",
+            maxParallelTasks:
+                options.maxParallelTasks ||
+                parseInt(process.env.MAX_PARALLEL_TASKS, 10) ||
+                3,
+            continueOnFailure:
+                options.continueOnFailure ??
+                process.env.CONTINUE_ON_FAILURE === "true" ??
+                false,
+            enableReview:
+                options.enableReview ??
+                process.env.ENABLE_REVIEW_IN_PARALLEL === "true",
         };
 
         // Initialize scope manager
@@ -35,16 +49,9 @@ export class AgentOrchestrator {
         this.questionAgent = new QuestionAgent(callLLM);
         this.planAgent = new PlanAgent(callLLM);
         this.executeAgent = new ExecuteAgentV2(callLLM, scopeManager, {
-            // Compression thresholds (estimated tokens)
-            lightThreshold: 1000000, // Below this: no compression
-            moderateThreshold: 1000000, // Below this: light compression
-            aggressiveThreshold: 1000000, // Below this: moderate compression
-            // Above aggressiveThreshold: LLM-based summarization
-
-            // Summarization triggers (raised thresholds to reduce frequency)
-            historyEntryThreshold: 15, // Summarize when history exceeds this (raised from 8)
-            tokenThreshold: 1000000, // or when tokens exceed this (raised from 6000)
-            preserveRecentEntries: 5, // Always keep this many recent entries (raised from 3)
+            // LLM summarization config
+            tokenThreshold: 100000, // Trigger summarization at 64k tokens
+            preserveRecentEntries: 3, // Keep recent 3 entries unsummarized
             maxSummaries: 3, // Maximum summaries to maintain
         });
 
@@ -206,25 +213,31 @@ export class AgentOrchestrator {
                 // 检查是否使用了并行执行模式，以及是否还有剩余步骤
                 const isParallelMode = this.config.useParallelExecution;
                 const plan = this.workflowState.plan;
-                const remainingSteps = plan?.steps?.filter(s => !s.removed) || [];
+                const remainingSteps =
+                    plan?.steps?.filter((s) => !s.removed) || [];
 
                 // 并行模式且所有步骤已完成时，直接转换到 COMPLETED
                 // 串行模式或仍有剩余步骤时，需要经过 REVIEWING
-                const needsReview = !isParallelMode || remainingSteps.length > 0;
+                const needsReview =
+                    !isParallelMode || remainingSteps.length > 0;
 
                 if (currentState === WorkflowStage.EXECUTING && needsReview) {
                     // 串行执行模式或有剩余步骤，需要先转换到 REVIEWING 状态
-                    await this.stateMachine.transition(WorkflowStage.REVIEWING, {
-                        plan: this.workflowState.plan,
-                        scope: this.workflowState.scope,
-                        currentStepIndex: this.workflowState.currentStepIndex,
-                        stepResult: {}, // 串行模式下需要 stepResult
-                    });
+                    await this.stateMachine.transition(
+                        WorkflowStage.REVIEWING,
+                        {
+                            plan: this.workflowState.plan,
+                            scope: this.workflowState.scope,
+                            currentStepIndex:
+                                this.workflowState.currentStepIndex,
+                            stepResult: {}, // 串行模式下需要 stepResult
+                        },
+                    );
                 }
                 // 然后转换到 COMPLETED
                 // 并行模式：currentStepIndex 始终为 0，需要传递一个足够大的值让守卫通过
                 const completedStepIndex = isParallelMode
-                    ? (this.workflowState.plan?.steps?.length || 0)
+                    ? this.workflowState.plan?.steps?.length || 0
                     : this.workflowState.currentStepIndex;
                 await this.stateMachine.transition(WorkflowStage.COMPLETED, {
                     plan: this.workflowState.plan,
@@ -238,7 +251,8 @@ export class AgentOrchestrator {
                 await this.stateMachine.transition(WorkflowStage.COMPLETED, {
                     plan: this.workflowState.plan,
                     scope: this.workflowState.scope,
-                    currentStepIndex: this.workflowState.plan?.steps?.length || 0,
+                    currentStepIndex:
+                        this.workflowState.plan?.steps?.length || 0,
                 });
             }
 
@@ -335,10 +349,18 @@ export class AgentOrchestrator {
             );
 
             // Determine execution mode based on config
-            const executionMode = this.config.useParallelExecution ? 'parallel' : 'serial';
-            console.log(`[Orchestrator] Using ${executionMode} execution mode for planning`);
+            const executionMode = this.config.useParallelExecution
+                ? "parallel"
+                : "serial";
+            console.log(
+                `[Orchestrator] Using ${executionMode} execution mode for planning`,
+            );
 
-            const plan = await this.planAgent.makePlan(infos, capabilitiesDoc, executionMode);
+            const plan = await this.planAgent.makePlan(
+                infos,
+                capabilitiesDoc,
+                executionMode,
+            );
 
             this._emit("planning:completed", { plan });
             return plan;
@@ -463,15 +485,18 @@ export class AgentOrchestrator {
     async _executeWithDAG() {
         this._emit("execution:started", {
             totalSteps: this.workflowState.plan.steps?.length || 0,
-            mode: 'parallel',
+            mode: "parallel",
         });
 
-        console.log('[Orchestrator] Using DAG-based parallel execution');
-        console.log(`[Orchestrator] Max parallel tasks: ${this.config.maxParallelTasks}`);
+        console.log("[Orchestrator] Using DAG-based parallel execution");
+        console.log(
+            `[Orchestrator] Max parallel tasks: ${this.config.maxParallelTasks}`,
+        );
 
         // 是否启用审查模式（可通过配置或环境变量控制）
-        const enableReview = this.config.enableReview ||
-            process.env.ENABLE_REVIEW_IN_PARALLEL === 'true';
+        const enableReview =
+            this.config.enableReview ||
+            process.env.ENABLE_REVIEW_IN_PARALLEL === "true";
 
         // 构建并验证 DAG
         const nodes = {};
@@ -498,9 +523,15 @@ export class AgentOrchestrator {
         // 推断边（如果依赖没有显式声明）
         const explicitEdges = inferEdges(nodes);
         const inferredEdges = inferEdgesFromOutputs(nodes);
-        const edges = [...explicitEdges, ...inferredEdges.filter(e =>
-            !explicitEdges.some(ee => ee.from === e.from && ee.to === e.to)
-        )];
+        const edges = [
+            ...explicitEdges,
+            ...inferredEdges.filter(
+                (e) =>
+                    !explicitEdges.some(
+                        (ee) => ee.from === e.from && ee.to === e.to,
+                    ),
+            ),
+        ];
 
         // 验证 DAG
         const validation = validateDAG(nodes, edges);
@@ -508,10 +539,14 @@ export class AgentOrchestrator {
             throw new Error(`DAG validation failed: ${validation.error}`);
         }
 
-        console.log(`[Orchestrator] DAG validated: ${Object.keys(nodes).length} nodes, ${edges.length} edges`);
+        console.log(
+            `[Orchestrator] DAG validated: ${Object.keys(nodes).length} nodes, ${edges.length} edges`,
+        );
 
         // 创建并行执行引擎
-        const executionMode = this.config.useParallelExecution ? 'parallel' : 'serial';
+        const executionMode = this.config.useParallelExecution
+            ? "parallel"
+            : "serial";
         const executor = new ParallelExecutionEngine(
             { ...this.workflowState.plan, nodes, edges },
             this.executeAgent,
@@ -524,18 +559,32 @@ export class AgentOrchestrator {
                 planAgent: enableReview ? this.planAgent : null,
                 executionMode,
                 onStepStart: (nodeId, node) => {
-                    this._emit("step:started", { stepIndex: node.index, step: node, nodeId });
+                    this._emit("step:started", {
+                        stepIndex: node.index,
+                        step: node,
+                        nodeId,
+                    });
                 },
                 onStepComplete: (nodeId, result) => {
-                    this._emit("step:completed", { stepIndex: nodes[nodeId].index, result, nodeId });
+                    this._emit("step:completed", {
+                        stepIndex: nodes[nodeId].index,
+                        result,
+                        nodeId,
+                    });
                 },
                 onStepError: (nodeId, error) => {
-                    this._emit("step:error", { stepIndex: nodes[nodeId].index, error, nodeId });
+                    this._emit("step:error", {
+                        stepIndex: nodes[nodeId].index,
+                        error,
+                        nodeId,
+                    });
                 },
                 onBatchComplete: (nodeIds) => {
-                    console.log(`[Orchestrator] Batch completed: ${nodeIds.join(', ')}`);
+                    console.log(
+                        `[Orchestrator] Batch completed: ${nodeIds.join(", ")}`,
+                    );
                 },
-            }
+            },
         );
 
         // 支持审查后的 DAG 重建循环
@@ -553,28 +602,41 @@ export class AgentOrchestrator {
                 // 检查是否需要重建 DAG
                 if (executionResult.needsDAGRebuild) {
                     rebuildCount++;
-                    console.log(`[Orchestrator] Rebuilding DAG (${rebuildCount}/${maxRebuilds})`);
+                    console.log(
+                        `[Orchestrator] Rebuilding DAG (${rebuildCount}/${maxRebuilds})`,
+                    );
 
                     const reviewResult = executionResult.rebuildReason;
 
                     // 处理审查决策
-                    if (reviewResult.decision === 'MODIFY_PLAN' && reviewResult.adjustments) {
+                    if (
+                        reviewResult.decision === "MODIFY_PLAN" &&
+                        reviewResult.adjustments
+                    ) {
                         this.workflowState.plan = this.planAgent.adjustPlan(
                             this.workflowState.plan,
                             reviewResult.adjustments,
                         );
-                        console.log('[Orchestrator] Plan adjusted based on review');
-                    } else if (reviewResult.decision === 'REORDER' && reviewResult.adjustments) {
+                        console.log(
+                            "[Orchestrator] Plan adjusted based on review",
+                        );
+                    } else if (
+                        reviewResult.decision === "REORDER" &&
+                        reviewResult.adjustments
+                    ) {
                         const reorderAdjustment = reviewResult.adjustments.find(
                             (a) => a.type === "reorder",
                         );
                         if (reorderAdjustment && reorderAdjustment.newOrder) {
-                            this.workflowState.plan = this.planAgent.reorderRemainingSteps(
-                                this.workflowState.plan,
-                                reorderAdjustment.newOrder,
-                                0,
+                            this.workflowState.plan =
+                                this.planAgent.reorderRemainingSteps(
+                                    this.workflowState.plan,
+                                    reorderAdjustment.newOrder,
+                                    0,
+                                );
+                            console.log(
+                                "[Orchestrator] Steps reordered based on review",
                             );
-                            console.log('[Orchestrator] Steps reordered based on review');
                         }
                     }
 
@@ -601,20 +663,39 @@ export class AgentOrchestrator {
                     const newExplicitEdges = inferEdges(newNodes);
                     const newInferredEdges = inferEdgesFromOutputs(newNodes);
                     currentNodes = newNodes;
-                    currentEdges = [...newExplicitEdges, ...newInferredEdges.filter(e =>
-                        !newExplicitEdges.some(ee => ee.from === e.from && ee.to === e.to)
-                    )];
+                    currentEdges = [
+                        ...newExplicitEdges,
+                        ...newInferredEdges.filter(
+                            (e) =>
+                                !newExplicitEdges.some(
+                                    (ee) =>
+                                        ee.from === e.from && ee.to === e.to,
+                                ),
+                        ),
+                    ];
 
                     // 验证新 DAG
-                    const newValidation = validateDAG(currentNodes, currentEdges);
+                    const newValidation = validateDAG(
+                        currentNodes,
+                        currentEdges,
+                    );
                     if (!newValidation.valid) {
-                        throw new Error(`Rebuilt DAG validation failed: ${newValidation.error}`);
+                        throw new Error(
+                            `Rebuilt DAG validation failed: ${newValidation.error}`,
+                        );
                     }
 
                     // 创建新的执行器
-                    const rebuildExecutionMode = this.config.useParallelExecution ? 'parallel' : 'serial';
+                    const rebuildExecutionMode = this.config
+                        .useParallelExecution
+                        ? "parallel"
+                        : "serial";
                     currentExecutor = new ParallelExecutionEngine(
-                        { ...this.workflowState.plan, nodes: currentNodes, edges: currentEdges },
+                        {
+                            ...this.workflowState.plan,
+                            nodes: currentNodes,
+                            edges: currentEdges,
+                        },
                         this.executeAgent,
                         this.scopeManager,
                         {
@@ -624,22 +705,38 @@ export class AgentOrchestrator {
                             planAgent: enableReview ? this.planAgent : null,
                             executionMode: rebuildExecutionMode,
                             onStepStart: (nodeId, node) => {
-                                this._emit("step:started", { stepIndex: node.index, step: node, nodeId });
+                                this._emit("step:started", {
+                                    stepIndex: node.index,
+                                    step: node,
+                                    nodeId,
+                                });
                             },
                             onStepComplete: (nodeId, result) => {
-                                this._emit("step:completed", { stepIndex: currentNodes[nodeId].index, result, nodeId });
+                                this._emit("step:completed", {
+                                    stepIndex: currentNodes[nodeId].index,
+                                    result,
+                                    nodeId,
+                                });
                             },
                             onStepError: (nodeId, error) => {
-                                this._emit("step:error", { stepIndex: currentNodes[nodeId].index, error, nodeId });
+                                this._emit("step:error", {
+                                    stepIndex: currentNodes[nodeId].index,
+                                    error,
+                                    nodeId,
+                                });
                             },
                             onBatchComplete: (nodeIds) => {
-                                console.log(`[Orchestrator] Batch completed: ${nodeIds.join(', ')}`);
+                                console.log(
+                                    `[Orchestrator] Batch completed: ${nodeIds.join(", ")}`,
+                                );
                             },
-                        }
+                        },
                     );
 
                     // 继续执行（保留已完成的结果）
-                    currentExecutor.results = executionResult.results.filter(r => !r.needsDAGRebuild);
+                    currentExecutor.results = executionResult.results.filter(
+                        (r) => !r.needsDAGRebuild,
+                    );
                     continue;
                 }
 
@@ -707,7 +804,9 @@ export class AgentOrchestrator {
      * @private
      */
     async _reviewStepExecution(step, executionResult) {
-        const executionMode = this.config.useParallelExecution ? 'parallel' : 'serial';
+        const executionMode = this.config.useParallelExecution
+            ? "parallel"
+            : "serial";
         try {
             const reviewResult = await this.planAgent.reviewStep(
                 step,

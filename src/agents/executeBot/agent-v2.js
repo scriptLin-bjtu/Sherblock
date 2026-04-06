@@ -39,19 +39,12 @@ export class ExecuteAgentV2 {
         this.skillRegistry = new SkillRegistry();
         this.initialized = false;
 
-        // Adaptive context manager (replaces old compression manager)
+        // Adaptive context manager (uses LLM-based summarization)
         this.contextManager = new AdaptiveContextManager(callLLM, {
-            // Use options to configure thresholds
-            lightThreshold: options.lightThreshold || 3000,
-            moderateThreshold: options.moderateThreshold || 6000,
-            aggressiveThreshold: options.aggressiveThreshold || 10000,
-            // Summarization trigger config
-            historyEntryThreshold: options.historyEntryThreshold || 8,
-            tokenThreshold: options.tokenThreshold || 6000,
+            // LLM summarization config (only valid options now)
+            tokenThreshold: options.tokenThreshold || 64000,
             preserveRecentEntries: options.preserveRecentEntries || 3,
             maxSummaries: options.maxSummaries || 3,
-            // Inherit other config
-            ...options.compressionConfig,
         });
 
         // Statistics
@@ -72,7 +65,7 @@ export class ExecuteAgentV2 {
         await this.skillRegistry.initialize();
 
         console.log("[ExecuteAgentV2] Initialized with Adaptive Context Management");
-        console.log(`[ExecuteAgentV2] Compression thresholds: Light=${this.contextManager.thresholds.light}, Moderate=${this.contextManager.thresholds.moderate}, Aggressive=${this.contextManager.thresholds.aggressive}`);
+        console.log(`[ExecuteAgentV2] Compression threshold: ${this.contextManager.threshold} tokens`);
 
         this.initialized = true;
     }
@@ -466,21 +459,11 @@ export class ExecuteAgentV2 {
      * Enable/disable adaptive compression
      */
     setCompressionEnabled(enabled) {
-        // Update thresholds to force tier selection
+        // Update threshold to enable/disable compression
         if (!enabled) {
-            // Set very high thresholds so we stay in NONE tier
-            this.contextManager.thresholds = {
-                light: Infinity,
-                moderate: Infinity,
-                aggressive: Infinity,
-            };
+            this.contextManager.threshold = Infinity;
         } else {
-            // Restore original thresholds
-            this.contextManager.thresholds = {
-                light: this.options.lightThreshold || 3000,
-                moderate: this.options.moderateThreshold || 6000,
-                aggressive: this.options.aggressiveThreshold || 10000,
-            };
+            this.contextManager.threshold = this.options.tokenThreshold || 64000;
         }
         console.log(`[ExecuteAgentV2] Compression ${enabled ? "enabled" : "disabled"}`);
     }

@@ -145,12 +145,10 @@ export class LLMSmartSummarizer {
             ...config,
         };
 
-        // Summarization triggers
+        // Summarization triggers - token-based only
         this.triggerConfig = {
-            // Trigger summarization when history exceeds this many entries
-            historyEntryThreshold: config.historyEntryThreshold || 8,
-            // Trigger when estimated tokens exceed this
-            tokenThreshold: config.tokenThreshold || 6000,
+            // Trigger when estimated tokens exceed this (default: 64k)
+            tokenThreshold: config.tokenThreshold || 64000,
             // Always keep this many recent entries unsummarized
             preserveRecentEntries: config.preserveRecentEntries || 3,
             // Maximum summaries to keep (oldest get merged)
@@ -188,22 +186,12 @@ export class LLMSmartSummarizer {
 
     /**
      * Check if we should trigger summarization
+     * Only triggers based on token count, not entry count
      */
     shouldTriggerSummarization() {
-        const historySize = this.workingHistory.length;
-
-        // Check history entry threshold
-        if (historySize >= this.triggerConfig.historyEntryThreshold) {
-            return true;
-        }
-
-        // Check token threshold
+        // Check token threshold only
         const estimatedTokens = this.estimateHistoryTokens();
-        if (estimatedTokens >= this.triggerConfig.tokenThreshold) {
-            return true;
-        }
-
-        return false;
+        return estimatedTokens >= this.triggerConfig.tokenThreshold;
     }
 
     /**
@@ -462,7 +450,9 @@ Create a merged summary that preserves all critical information. Output in the s
             ...this.stats,
             summaryCount: this.summaries.length,
             workingHistorySize: this.workingHistory.length,
-            triggerConfig: this.triggerConfig,
+            // Only return token-based threshold (no entry threshold)
+            tokenThreshold: this.triggerConfig.tokenThreshold,
+            preserveRecentEntries: this.triggerConfig.preserveRecentEntries,
         };
     }
 

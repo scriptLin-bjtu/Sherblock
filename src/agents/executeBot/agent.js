@@ -40,11 +40,11 @@ export class ExecuteAgent {
 
         // Initialize compression manager if enabled
         if (this.compressionEnabled && !this.useLegacyPrompt) {
-            this.compressionManager = new CompressionManager({
+            this.compressionManager = new CompressionManager(this.callLLM, {
                 enabled: true,
                 ...(this._options.compressionConfig || {}),
             });
-            console.log("[ExecuteAgent] Compression enabled");
+            console.log("[ExecuteAgent] Compression enabled (LLM summarization only)");
         } else {
             console.log("[ExecuteAgent] Compression disabled (legacy mode)");
         }

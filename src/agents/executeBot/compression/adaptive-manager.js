@@ -1,30 +1,24 @@
 /**
  * Adaptive Context Manager for ExecuteAgent
  *
- * Replaces the static CompressionManager with an adaptive system that:
- * - Dynamically adjusts compression strategy based on context size
- * - Uses LLM-based smart summarization when beneficial
- * - Falls back to fast compression for small contexts
- * - Maintains a tiered context structure
+ * Simplified: Only uses LLM-based smart summarization
+ * No automatic truncation or field filtering
  */
 
 import { compressionConfig, debugLog, estimateTokens } from "./config.js";
-import { HistoryCompressor } from "./history-compressor.js";
-import { ScopeFilter } from "./scope-filter.js";
 import { LLMSmartSummarizer, SmartSummary } from "./llm-summarizer.js";
 
 /**
  * Compression Tier Enum
  */
 export const CompressionTier = {
-    NONE: "none",           // No compression needed
-    LIGHT: "light",         // Fast compression only
-    MODERATE: "moderate",    // Scope filtering + history truncation
-    AGGRESSIVE: "aggressive", // LLM-based summarization
+    NONE: "none",           // No compression needed (context small)
+    AGGRESSIVE: "aggressive", // LLM-based summarization (context large)
 };
 
 /**
  * Adaptive Context Manager
+ * Simplified: only NONE and AGGRESSIVE tiers (LLM summarization)
  */
 export class AdaptiveContextManager {
     constructor(callLLM, config = {}) {
@@ -34,17 +28,15 @@ export class AdaptiveContextManager {
             ...config,
         };
 
-        // Tier thresholds (estimated tokens)
-        this.thresholds = {
-            light: config.lightThreshold || 3000,
-            moderate: config.moderateThreshold || 6000,
-            aggressive: config.aggressiveThreshold || 10000,
-        };
+        // Only one threshold: when to trigger LLM summarization
+        this.threshold = config.tokenThreshold || config.threshold || this.config.llmSummarizer.tokenThreshold || 64000;
 
-        // Sub-components
-        this.historyCompressor = new HistoryCompressor(this.config.history);
-        this.scopeFilter = new ScopeFilter(this.config.scope);
-        this.llmSummarizer = callLLM ? new LLMSmartSummarizer(callLLM, config) : null;
+        // LLM Smart Summarizer
+        this.llmSummarizer = callLLM ? new LLMSmartSummarizer(callLLM, {
+            tokenThreshold: this.threshold,
+            preserveRecentEntries: this.config.llmSummarizer.preserveRecentEntries || 3,
+            maxSummaries: this.config.llmSummarizer.maxSummaries || 3,
+        }) : null;
 
         // State
         this.currentTier = CompressionTier.NONE;
@@ -52,18 +44,12 @@ export class AdaptiveContextManager {
             totalCalls: 0,
             tierDistribution: {
                 [CompressionTier.NONE]: 0,
-                [CompressionTier.LIGHT]: 0,
-                [CompressionTier.MODERATE]: 0,
                 [CompressionTier.AGGRESSIVE]: 0,
             },
             originalTokens: 0,
             compressedTokens: 0,
             summarizationCalls: 0,
         };
-
-        // Context state
-        this.summaries = []; // Accumulated LLM summaries
-        this.workingHistory = []; // Recent history not yet summarized
     }
 
     /**
@@ -76,7 +62,7 @@ export class AdaptiveContextManager {
         const originalSize = this.estimateContextSize(scope, currentStep, executionHistory);
         this.stats.originalTokens += originalSize;
 
-        // Determine compression tier
+        // Determine compression tier (only NONE or AGGRESSIVE)
         const tier = this.determineTier(originalSize, options);
         this.currentTier = tier;
         this.stats.tierDistribution[tier]++;
@@ -89,21 +75,10 @@ export class AdaptiveContextManager {
 
         // Apply compression based on tier
         let result;
-        switch (tier) {
-            case CompressionTier.NONE:
-                result = await this.applyNoCompression(scope, currentStep, executionHistory);
-                break;
-            case CompressionTier.LIGHT:
-                result = await this.applyLightCompression(scope, currentStep, executionHistory);
-                break;
-            case CompressionTier.MODERATE:
-                result = await this.applyModerateCompression(scope, currentStep, executionHistory);
-                break;
-            case CompressionTier.AGGRESSIVE:
-                result = await this.applyAggressiveCompression(scope, currentStep, executionHistory);
-                break;
-            default:
-                result = await this.applyModerateCompression(scope, currentStep, executionHistory);
+        if (tier === CompressionTier.NONE) {
+            result = await this.applyNoCompression(scope, currentStep, executionHistory);
+        } else {
+            result = await this.applyAggressiveCompression(scope, currentStep, executionHistory);
         }
 
         // Update stats
@@ -137,17 +112,11 @@ export class AdaptiveContextManager {
             return options.forceTier;
         }
 
-        // Check thresholds
-        if (estimatedTokens < this.thresholds.light) {
-            return CompressionTier.NONE;
-        } else if (estimatedTokens < this.thresholds.moderate) {
-            return CompressionTier.LIGHT;
-        } else if (estimatedTokens < this.thresholds.aggressive) {
-            return CompressionTier.MODERATE;
-        } else {
-            // Only use aggressive if LLM is available
-            return this.llmSummarizer ? CompressionTier.AGGRESSIVE : CompressionTier.MODERATE;
+        // Only trigger LLM summarization when threshold exceeded
+        if (estimatedTokens >= this.threshold && this.llmSummarizer) {
+            return CompressionTier.AGGRESSIVE;
         }
+        return CompressionTier.NONE;
     }
 
     /**
@@ -174,57 +143,12 @@ export class AdaptiveContextManager {
     }
 
     /**
-     * Light compression - fast truncation only
-     */
-    async applyLightCompression(scope, currentStep, executionHistory) {
-        // Only truncate very long individual entries
-        const truncatedHistory = executionHistory.map((entry) => {
-            if (!entry || !entry.content) return entry;
-
-            const contentStr = typeof entry.content === "string"
-                ? entry.content
-                : JSON.stringify(entry.content);
-
-            if (contentStr.length > 2000) {
-                return {
-                    ...entry,
-                    content: contentStr.substring(0, 2000) + "...[truncated]",
-                };
-            }
-            return entry;
-        });
-
-        return {
-            scope,
-            currentStep,
-            history: truncatedHistory,
-            compressed: true,
-        };
-    }
-
-    /**
-     * Moderate compression - use existing compression components
-     */
-    async applyModerateCompression(scope, currentStep, executionHistory) {
-        // Use existing components
-        const compressedHistory = this.historyCompressor.compress(executionHistory);
-        const filteredScope = this.scopeFilter.filter(scope, currentStep);
-
-        return {
-            scope: filteredScope,
-            currentStep,
-            history: compressedHistory,
-            compressed: true,
-        };
-    }
-
-    /**
-     * Aggressive compression - use LLM-based summarization
+     * Aggressive compression - use LLM-based summarization only
      */
     async applyAggressiveCompression(scope, currentStep, executionHistory) {
         if (!this.llmSummarizer) {
-            // Fallback to moderate
-            return this.applyModerateCompression(scope, currentStep, executionHistory);
+            // Fallback to no compression
+            return this.applyNoCompression(scope, currentStep, executionHistory);
         }
 
         // Update current step in summarizer
@@ -238,14 +162,12 @@ export class AdaptiveContextManager {
         // Get current context view
         const contextView = this.llmSummarizer.getCurrentContextView();
 
-        // Use filtered scope
-        const filteredScope = this.scopeFilter.filter(scope, currentStep);
-
         // Increment stats
         this.stats.summarizationCalls++;
 
+        // Pass scope unchanged - let LLM handle context
         return {
-            scope: filteredScope,
+            scope, // No filtering - pass through
             currentStep,
             // The history now includes formatted summaries + working history
             history: [{ type: "SMART_SUMMARY", content: contextView.formattedText }],
@@ -261,8 +183,6 @@ export class AdaptiveContextManager {
         return {
             ...this.stats,
             currentTier: this.currentTier,
-            summaryCount: this.summaries.length,
-            workingHistorySize: this.workingHistory.length,
             llmSummarizerStats: this.llmSummarizer?.getStats(),
         };
     }
@@ -271,15 +191,11 @@ export class AdaptiveContextManager {
      * Reset state
      */
     reset() {
-        this.summaries = [];
-        this.workingHistory = [];
         this.currentTier = CompressionTier.NONE;
         this.stats = {
             totalCalls: 0,
             tierDistribution: {
                 [CompressionTier.NONE]: 0,
-                [CompressionTier.LIGHT]: 0,
-                [CompressionTier.MODERATE]: 0,
                 [CompressionTier.AGGRESSIVE]: 0,
             },
             originalTokens: 0,
