@@ -2200,10 +2200,6 @@ function showApiKeyDialog() {
       <h3>API Key Configuration</h3>
       <div class="api-key-form">
         <div class="form-group">
-          <label>GLM API Key</label>
-          <input type="password" id="api-key-glm" placeholder="Enter GLM API Key">
-        </div>
-        <div class="form-group">
           <label>DeepSeek API Key</label>
           <input type="password" id="api-key-deepseek" placeholder="Enter DeepSeek API Key">
         </div>
@@ -2222,8 +2218,6 @@ function showApiKeyDialog() {
 
     // Load saved keys from localStorage
     const savedKeys = JSON.parse(localStorage.getItem("apiKeys") || "{}");
-    if (savedKeys.glm)
-        document.getElementById("api-key-glm").value = savedKeys.glm;
     if (savedKeys.deepseek)
         document.getElementById("api-key-deepseek").value = savedKeys.deepseek;
     if (savedKeys.etherscan)
@@ -2236,7 +2230,6 @@ function showApiKeyDialog() {
         .addEventListener("click", () => modal.remove());
     document.getElementById("btn-save-api").addEventListener("click", () => {
         const apiKeys = {
-            glm: document.getElementById("api-key-glm").value.trim(),
             deepseek: document.getElementById("api-key-deepseek").value.trim(),
             etherscan: document
                 .getElementById("api-key-etherscan")

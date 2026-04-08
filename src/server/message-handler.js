@@ -92,7 +92,6 @@ export default class MessageHandler {
 
         // 设置API密钥
         if (apiKeys) {
-            if (apiKeys.glm) process.env.GLM_API_KEY = apiKeys.glm;
             if (apiKeys.deepseek) process.env.DEEPSEEK_API_KEY = apiKeys.deepseek;
             if (apiKeys.etherscan) process.env.ETHERSCAN_API_KEY = apiKeys.etherscan;
         }

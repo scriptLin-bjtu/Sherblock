@@ -17,20 +17,12 @@ export async function callLLM({
     systemPrompt,
     apiKey,
     user_messages,
-    modelProvider = "glm", // 默认使用GLM
+    modelProvider = "deepseek", // 默认使用DeepSeek
     modelName = null, // 可选：指定具体的模型名称
     options = {}, // 新增：额外配置选项
 }) {
     // 配置不同模型提供商的参数
     const providers = {
-        glm: {
-            url: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-            defaultModel: "glm-4.7-flash",
-            headers: (key) => ({
-                Authorization: `Bearer ${key}`,
-                "Content-Type": "application/json",
-            }),
-        },
         deepseek: {
             url: "https://api.deepseek.com/chat/completions",
             defaultModel: "deepseek-chat",
@@ -39,7 +31,7 @@ export async function callLLM({
                 "Content-Type": "application/json",
             }),
         },
-        // 新增：DeepSeek Reasoner（深度思考模型）
+        // DeepSeek Reasoner（深度思考模型）
         "deepseek-reasoner": {
             url: "https://api.deepseek.com/chat/completions",
             defaultModel: "deepseek-reasoner", // DeepSeek-V3.2 思考模式
@@ -59,18 +51,14 @@ export async function callLLM({
         },
     };
 
-    // 获取指定提供商的配置，如果没有则使用GLM作为默认
-    const provider = providers[modelProvider] || providers.glm;
+    // 获取指定提供商的配置，如果没有则使用deepseek作为默认
+    const provider = providers[modelProvider] || providers.deepseek;
 
     // 确定最终使用的模型名称
     const finalModel = modelName || provider.defaultModel;
 
     // 根据 provider 自动选择环境变量作为 apiKey 默认值
-    const finalApiKey = apiKey || (
-        modelProvider === 'deepseek' || modelProvider === 'deepseek-reasoner'
-            ? process.env.DEEPSEEK_API_KEY
-            : process.env.GLM_API_KEY
-    );
+    const finalApiKey = apiKey || process.env.DEEPSEEK_API_KEY;
 
     // 构建基础请求体
     const baseBody = {
@@ -91,21 +79,6 @@ export async function callLLM({
     let requestBody;
 
     switch (modelProvider) {
-        case "glm":
-            requestBody = {
-                ...baseBody,
-                thinking: {
-                    type: "enabled",
-                },
-                // GLM 支持的标准参数
-                ...(options.max_tokens && { max_tokens: options.max_tokens }),
-                ...(options.temperature !== undefined && {
-                    temperature: options.temperature,
-                }),
-                ...(options.top_p !== undefined && { top_p: options.top_p }),
-            };
-            break;
-
         case "deepseek":
             requestBody = {
                 ...baseBody,
