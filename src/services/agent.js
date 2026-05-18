@@ -22,32 +22,34 @@ export async function callLLM({
     options = {}, // 新增：额外配置选项
 }) {
     // 配置不同模型提供商的参数
+    // DeepSeek V4: thinking 模式已从模型名变为请求参数
+    // - deepseek: V4 Flash 默认 thinking 开启，适合需要上下文理解的任务
+    // - deepseek-reasoner: V4 Flash thinking 开启 + reasoning_effort，适合复杂推理
     const providers = {
         deepseek: {
             url: "https://api.deepseek.com/chat/completions",
-            defaultModel: "deepseek-chat",
+            defaultModel: "deepseek-v4-flash",
             headers: (key) => ({
                 Authorization: `Bearer ${key}`,
                 "Content-Type": "application/json",
             }),
+            defaultOptions: {
+                reasoning_effort: "high",
+            },
         },
-        // DeepSeek Reasoner（深度思考模型）
+        // DeepSeek Reasoner（深度思考模式）- 使用 V4 Flash thinking 模式
         "deepseek-reasoner": {
             url: "https://api.deepseek.com/chat/completions",
-            defaultModel: "deepseek-reasoner", // DeepSeek-V3.2 思考模式
+            defaultModel: "deepseek-v4-flash",
             headers: (key) => ({
                 Authorization: `Bearer ${key}`,
                 "Content-Type": "application/json",
             }),
-            // Reasoner 模型限制提示
-            unsupportedParams: [
-                "temperature",
-                "top_p",
-                "presence_penalty",
-                "frequency_penalty",
-                "logprobs",
-                "top_logprobs",
-            ],
+            // V4 thinking 模式，支持所有标准参数（temperature/top_p 等不再受限）
+            defaultOptions: {
+                thinking: { type: "enabled" },
+                reasoning_effort: "high",
+            },
         },
     };
 
@@ -80,10 +82,14 @@ export async function callLLM({
 
     switch (modelProvider) {
         case "deepseek":
+        case "deepseek-reasoner":
+            // V4 统一参数支持：thinking 模式和 reasoning_effort
+            // 注意：V4 默认开启 thinking，deepseek provider 通过 defaultOptions 关闭
             requestBody = {
                 ...baseBody,
+                // 合并 provider 默认选项（如 thinking 开关）
+                ...(provider.defaultOptions || {}),
                 stream: options.stream ?? false,
-                // DeepSeek 标准模型支持的参数
                 ...(options.max_tokens && { max_tokens: options.max_tokens }),
                 ...(options.temperature !== undefined && {
                     temperature: options.temperature,
@@ -96,6 +102,12 @@ export async function callLLM({
                     presence_penalty: options.presence_penalty,
                 }),
                 ...(options.seed && { seed: options.seed }),
+                // V4 thinking 模式覆盖（允许调用方覆盖默认值）
+                ...(options.thinking && { thinking: options.thinking }),
+                // reasoning_effort: "high"（默认）或 "max"
+                ...(options.reasoning_effort && {
+                    reasoning_effort: options.reasoning_effort,
+                }),
                 // 工具调用
                 ...(options.tools && { tools: options.tools }),
                 ...(options.tool_choice && {
@@ -106,51 +118,6 @@ export async function callLLM({
                     response_format: options.response_format,
                 }),
             };
-            break;
-
-        case "deepseek-reasoner":
-            requestBody = {
-                ...baseBody,
-                // Reasoner 模型仅支持以下参数：
-                stream: options.stream ?? false,
-                // max_tokens: 控制最终回答长度（不含思维链），默认4K，最大8K
-                // 注意：思维链输出最多可达32K tokens，不计入上下文长度
-                ...(options.max_tokens && { max_tokens: options.max_tokens }),
-
-                // 工具调用（思考模式下已支持）
-                ...(options.tools && { tools: options.tools }),
-                ...(options.tool_choice && {
-                    tool_choice: options.tool_choice,
-                }),
-
-                // JSON 输出（思考模式下已支持）
-                ...(options.response_format && {
-                    response_format: options.response_format,
-                }),
-
-                // 注意：以下参数在 reasoner 模型中不生效，已过滤
-                // temperature, top_p, presence_penalty, frequency_penalty, logprobs, top_logprobs
-            };
-
-            // 警告：如果传入了不支持的参数，打印警告
-            const unsupported = [
-                "temperature",
-                "top_p",
-                "presence_penalty",
-                "frequency_penalty",
-                "logprobs",
-                "top_logprobs",
-            ];
-            const usedUnsupported = unsupported.filter(
-                (param) => options[param] !== undefined
-            );
-            if (usedUnsupported.length > 0) {
-                console.warn(
-                    `[DeepSeek Reasoner] 以下参数不生效: ${usedUnsupported.join(
-                        ", "
-                    )}`
-                );
-            }
             break;
 
         default:
@@ -201,12 +168,9 @@ export async function callLLM({
             // 提取内容
             let content = message.content;
 
-            // DeepSeek Reasoner 特殊处理：提取思维链内容
+            // 提取思维链内容（V4 thinking 模式下所有 provider 均可返回）
             let reasoningContent = null;
-            if (
-                modelProvider === "deepseek-reasoner" &&
-                message.reasoning_content
-            ) {
+            if (message.reasoning_content) {
                 reasoningContent = message.reasoning_content;
             }
 

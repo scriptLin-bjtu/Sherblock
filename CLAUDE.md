@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is a **Blockchain Transaction Behavior Analysis Agent** - a multi-agent system for analyzing blockchain transactions and addresses. It uses a Plan-and-Execute architecture with three specialized agents coordinated by a central orchestrator. The project uses ES Modules (`"type": "module"`).
 
 1. **QuestionAgent** (`src/agents/questionBot/`) - Interactive information collection using ReAct pattern
-2. **PlanAgent** (`src/agents/planBot/`) - Strategic planning using deepseek-reasoner model
+2. **PlanAgent** (`src/agents/planBot/`) - Strategic planning using deepseek-v4-flash thinking mode
 3. **ExecuteAgent** (`src/agents/executeBot/`) - Step execution using ReAct pattern with blockchain skills
 4. **AgentOrchestrator** (`src/agents/orchestrator/`) - Central coordinator managing workflow state transitions
 
@@ -73,8 +73,8 @@ See `docs/parallel/README.md` for detailed parallel execution documentation.
 
 Unified interface for multiple LLM providers:
 - **GLM** (default): `glm-4.7-flash`, supports thinking mode
-- **DeepSeek**: `deepseek-chat`, standard chat model
-- **DeepSeek Reasoner**: `deepseek-reasoner`, deep thinking mode (no temperature/top_p support)
+- **DeepSeek**: `deepseek-v4-flash` (default)、`deepseek-v4-pro`，均支持 thinking 模式切换
+- **DeepSeek Reasoner**: 使用 `deepseek-v4-flash` + thinking enabled，深度思考模式（支持 temperature/top_p 等全参数）
 
 ### Blockchain Skills (`src/agents/executeBot/skills/`)
 

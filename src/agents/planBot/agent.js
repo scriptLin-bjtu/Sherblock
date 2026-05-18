@@ -249,6 +249,7 @@ export class PlanAgent {
             modelProvider: "deepseek-reasoner",
             options: {
                 max_tokens: 32000,
+                reasoning_effort: "high",
             },
         });
 
@@ -296,6 +297,7 @@ export class PlanAgent {
             modelProvider: "deepseek-reasoner",
             options: {
                 max_tokens: 4000,
+                reasoning_effort: "high",
             },
         });
 

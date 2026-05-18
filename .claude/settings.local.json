@@ -71,7 +71,8 @@
       "Bash(npx @mermaid-js/mermaid-cli -i thesis/figures/question-agent-flow.mmd -o thesis/figures/question-agent-flow.pdf)",
       "Bash(npx @mermaid-js/mermaid-cli -i thesis/figures/directory-structure.mmd -o thesis/figures/directory-structure.pdf)",
       "Bash(npx @mermaid-js/mermaid-cli -i thesis/figures/parallel-execution.mmd -o thesis/figures/parallel-execution.pdf)",
-      "Bash(npx @mermaid-js/mermaid-cli -i thesis/figures/context-compression.mmd -o thesis/figures/context-compression.pdf)"
+      "Bash(npx @mermaid-js/mermaid-cli -i thesis/figures/context-compression.mmd -o thesis/figures/context-compression.pdf)",
+      "mcp__exa__web_search_exa"
     ]
   }
 }
