@@ -9,6 +9,7 @@ import { writeFile, mkdir, readdir } from "fs/promises";
 import { join } from "path";
 import { workspaceManager } from "../../../../../utils/workspace-manager.js";
 import { scopeManager } from "../../../../../utils/scope-manager.js";
+import { ArtifactRepository } from "../../../../../db/artifact-repository.js";
 
 /**
  * Generate a timestamp string for filenames: YYYYMMDD-HHmmss
@@ -346,6 +347,21 @@ export default {
                 );
             }
             await writeFile(outputPath, markdownContent, "utf-8");
+
+            // Register in artifact database
+            try {
+                const workspaceId = workspaceManager.getWorkspaceId();
+                if (workspaceId) {
+                    const artifactRepo = new ArtifactRepository();
+                    await artifactRepo.addReport(workspaceId, {
+                        filename: outputFilename,
+                        filePath: outputPath,
+                        title: title,
+                    });
+                }
+            } catch {
+                // Don't fail report generation if DB registration fails
+            }
 
             console.log(
                 `[GENERATE_MARKDOWN_REPORT] Report saved to: ${outputPath}`,

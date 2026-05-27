@@ -9,6 +9,7 @@ import * as vegaLite from "vega-lite";
 import canvas from "canvas";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
+import { ArtifactRepository } from "../../../../db/artifact-repository.js";
 
 /**
  * Generate timestamp string for filenames: YYYYMMDD-HHmmss
@@ -537,6 +538,22 @@ export async function updateScopeWithChart(scopeManager, chartMetadata) {
     };
 
     await scopeManager.write(updatedScope);
+
+    // Also register in artifact database
+    try {
+        const workspaceId = chartMetadata.filePath?.split(/[\\/]/).find(s => s.startsWith('workspace-'));
+        if (workspaceId) {
+            const artifactRepo = new ArtifactRepository();
+            await artifactRepo.addChart(workspaceId, {
+                filename: chartMetadata.filename,
+                filePath: chartMetadata.filePath,
+                title: chartMetadata.title,
+                chartType: chartMetadata.type,
+            });
+        }
+    } catch {
+        // Don't fail chart generation if DB registration fails
+    }
 
     return updatedScope;
 }

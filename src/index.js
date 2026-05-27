@@ -3,6 +3,7 @@ import { callLLM } from "./services/agent.js";
 import { AgentOrchestrator } from "./agents/orchestrator/index.js";
 import { logger } from "./utils/logger.js";
 import { workspaceManager } from "./utils/workspace-manager.js";
+import { Database } from "./db/database.js";
 
 // 解析命令行参数
 const args = process.argv.slice(2);
@@ -114,6 +115,10 @@ orchestrator.on('workflow:error', (data) => {
 // Main entry point
 async function main() {
     try {
+        // Initialize database
+        const database = Database.getInstance();
+        await database.open();
+
         // Initialize workspace first (needed for logger)
         await workspaceManager.initialize();
 
@@ -144,10 +149,12 @@ async function main() {
 
         rl.close();
         await logger.close();
+        Database.getInstance().close();
     } catch (error) {
         console.error('Workflow failed:', error);
         rl.close();
         await logger.close();
+        Database.getInstance().close();
         process.exit(1);
     }
 }

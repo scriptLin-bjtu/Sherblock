@@ -7,6 +7,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { workspaceManager } from '../utils/workspace-manager.js';
 import { scopeManager } from '../utils/scope-manager.js';
+import { Database } from '../db/database.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -221,18 +222,29 @@ export default class MessageHandler {
 
         const workspacePath = join(process.cwd(), 'data', workspaceId);
 
-        // 检查工作区是否存在
+        // Check if workspace exists (in DB or filesystem)
         try {
-            await stat(workspacePath);
+            const db = Database.getInstance().getDb();
+            const row = db.prepare('SELECT 1 FROM workspaces WHERE id = ?').get(workspaceId);
+            if (!row) {
+                // Also check filesystem
+                await stat(workspacePath);
+            }
+            // Delete from database (CASCADE removes all related data)
+            db.prepare('DELETE FROM workspaces WHERE id = ?').run(workspaceId);
         } catch (error) {
             if (error.code === 'ENOENT') {
                 throw new Error('Workspace not found');
             }
-            throw error;
+            // If DB fails, still try filesystem
         }
 
-        // 删除工作区目录
-        await rm(workspacePath, { recursive: true, force: true });
+        // Delete filesystem directory
+        try {
+            await rm(workspacePath, { recursive: true, force: true });
+        } catch {
+            // Directory may not exist
+        }
 
         // 广播工作区列表更新
         this.wsServer.broadcast('WORKSPACES_LIST', {
@@ -461,10 +473,46 @@ export default class MessageHandler {
     }
 
     /**
-     * 获取工作流日志（JSON格式）
+     * 获取工作流日志（JSON格式）- 优先从数据库查询
      */
     async handleGetWorkflowLog(message) {
         const { workspaceId } = message.payload;
+
+        // Try database first
+        try {
+            const db = Database.getInstance().getDb();
+            const rows = db.prepare(`
+                SELECT entry_type, role, agent, content, entry_data, timestamp
+                FROM workflow_logs WHERE workspace_id = ?
+                ORDER BY timestamp ASC
+            `).all(workspaceId);
+
+            if (rows.length > 0) {
+                const logs = rows.map(row => {
+                    const entry = { type: row.entry_type, timestamp: row.timestamp };
+                    if (row.role) entry.role = row.role;
+                    if (row.agent) entry.agent = row.agent;
+                    if (row.content) entry.content = row.content;
+                    if (row.entry_data) {
+                        try {
+                            Object.assign(entry, JSON.parse(row.entry_data));
+                        } catch { /* ignore */ }
+                    }
+                    return entry;
+                });
+
+                return {
+                    id: message.id,
+                    type: 'WORKFLOW_LOG_CONTENT',
+                    timestamp: Date.now(),
+                    payload: { workspaceId, logs }
+                };
+            }
+        } catch (error) {
+            console.warn('[MessageHandler] DB query for workflow log failed, falling back to file:', error.message);
+        }
+
+        // Fallback: file-based read
         const workspacePath = join(process.cwd(), 'data', workspaceId);
         const logPath = join(workspacePath, 'logs', 'workflow.json');
 
@@ -472,11 +520,9 @@ export default class MessageHandler {
             const content = await readFile(logPath, 'utf-8');
             let logs;
 
-            // 尝试解析 JSON，失败时尝试修复
             try {
                 logs = JSON.parse(content);
             } catch (parseError) {
-                // JSON 损坏，尝试修复：找到最后一个完整的 JSON 对象
                 console.warn('[MessageHandler] JSON parse failed, attempting repair:', parseError.message);
                 logs = this._tryRepairJson(content);
             }
@@ -566,9 +612,106 @@ export default class MessageHandler {
     // ============ 辅助方法 ============
 
     /**
-     * 列出所有工作区
+     * 列出所有工作区（优先从数据库查询）
      */
     async listWorkspaces() {
+        // Try database first
+        try {
+            const db = Database.getInstance().getDb();
+            const rows = db.prepare(`
+                SELECT w.id, w.title, w.created_at, w.updated_at, w.status
+                FROM workspaces w
+                ORDER BY w.created_at DESC
+            `).all();
+
+            if (rows.length > 0) {
+                const workspaces = [];
+                for (const row of rows) {
+                    const workspacePath = join(process.cwd(), 'data', row.id);
+                    const hasCharts = await this.hasFiles(workspacePath, 'charts');
+                    const hasReports = await this.hasFiles(workspacePath, 'reports');
+
+                    // Try to read scope from DB (scope_repository) or file
+                    let scope = null;
+                    try {
+                        const scopeRows = db.prepare(
+                            'SELECT scope_key, scope_value FROM scope_entries WHERE workspace_id = ?'
+                        ).all(row.id);
+                        if (scopeRows.length > 0) {
+                            scope = {};
+                            for (const sr of scopeRows) {
+                                scope[sr.scope_key] = JSON.parse(sr.scope_value);
+                            }
+                        } else {
+                            scope = await this.readScope(workspacePath);
+                        }
+                    } catch {
+                        scope = await this.readScope(workspacePath);
+                    }
+
+                    // Read workflow status
+                    let workflowStatus = null;
+                    let isCompleted = false;
+                    try {
+                        const lastLog = db.prepare(`
+                            SELECT entry_type, entry_data FROM workflow_logs
+                            WHERE workspace_id = ?
+                            ORDER BY timestamp DESC LIMIT 1
+                        `).get(row.id);
+                        if (lastLog) {
+                            isCompleted = lastLog.entry_type === 'workflow_completed';
+                        }
+
+                        // Determine stage from logs
+                        const stageLog = db.prepare(`
+                            SELECT entry_type, entry_data FROM workflow_logs
+                            WHERE workspace_id = ? AND entry_type = 'stage_change'
+                            ORDER BY timestamp DESC LIMIT 1
+                        `).get(row.id);
+
+                        workflowStatus = {
+                            stage: stageLog ? JSON.parse(stageLog.entry_data || '{}').to : (row.status !== 'idle' ? row.status : 'idle'),
+                            isRunning: row.status !== 'idle' && row.status !== 'completed',
+                            awaitingUserInput: false,
+                        };
+                    } catch {
+                        // Fall back to file-based workflow status
+                        try {
+                            const workflowInfo = await this._getWorkflowStatusFromFile(workspacePath);
+                            workflowStatus = workflowInfo.status;
+                            isCompleted = workflowInfo.isCompleted;
+                        } catch {
+                            // Ignore
+                        }
+                    }
+
+                    workspaces.push({
+                        workspaceId: row.id,
+                        createdAt: new Date(row.created_at).getTime(),
+                        title: row.title || scope?.basic_infos?.user_questions?.[0] ||
+                            scope?.basic_infos?.goal || row.id,
+                        hasCharts,
+                        hasReports,
+                        hasLogs: true,
+                        scope,
+                        workflowStatus,
+                        isCompleted,
+                    });
+                }
+                return workspaces;
+            }
+        } catch (error) {
+            console.warn('[MessageHandler] DB query failed, falling back to filesystem:', error.message);
+        }
+
+        // Fallback: filesystem scan (original logic)
+        return this._listWorkspacesFromFilesystem();
+    }
+
+    /**
+     * 从文件系统扫描工作区列表（fallback）
+     */
+    async _listWorkspacesFromFilesystem() {
         const dataDir = join(process.cwd(), 'data');
 
         try {
@@ -593,6 +736,41 @@ export default class MessageHandler {
             }
             throw error;
         }
+    }
+
+    /**
+     * 从文件读取工作流状态（fallback）
+     */
+    async _getWorkflowStatusFromFile(workspacePath) {
+        let workflowStatus = null;
+        let isCompleted = false;
+
+        const workflowPath = join(workspacePath, 'logs', 'workflow.json');
+        const workflowContent = await readFile(workflowPath, 'utf-8');
+        const workflowLogs = JSON.parse(workflowContent);
+
+        let currentStage = 'idle';
+        for (let i = workflowLogs.length - 1; i >= 0; i--) {
+            const log = workflowLogs[i];
+            if (log.type === 'stage_change') { currentStage = log.to; break; }
+            if (log.type === 'plan_generated') { currentStage = 'planning'; break; }
+            if (log.type === 'step_started') { currentStage = 'executing'; break; }
+        }
+
+        const stepStarts = workflowLogs.filter(l => l.type === 'step_started');
+        const stepCompletes = workflowLogs.filter(l => l.type === 'step_completed');
+        const lastUserInput = workflowLogs.filter(l => l.type === 'user_input' || l.type === 'user_answer');
+        const lastAgentQuestion = workflowLogs.filter(l => l.type === 'agent_question');
+
+        const awaitingUserInput = lastAgentQuestion.length > lastUserInput.length;
+        const isRunning = stepStarts.length > stepCompletes.length || awaitingUserInput;
+
+        workflowStatus = { stage: currentStage, isRunning, awaitingUserInput };
+
+        const lastLog = workflowLogs[workflowLogs.length - 1];
+        isCompleted = lastLog && lastLog.type === 'workflow_completed';
+
+        return { status: workflowStatus, isCompleted };
     }
 
     /**

@@ -5,6 +5,8 @@
 import HttpServer from './http-server.js';
 import WebSocketServer from './websocket-server.js';
 import WorkspaceWatcher from './workspace-watcher.js';
+import { Database } from '../db/database.js';
+import { ChangeBroadcaster } from '../db/change-broadcaster.js';
 
 export class Server {
     constructor(options = {}) {
@@ -14,6 +16,7 @@ export class Server {
         this.httpServer = new HttpServer({ port: this.httpPort });
         this.wsServer = null;
         this.workspaceWatcher = null;
+        this.changeBroadcaster = null;
     }
 
     /**
@@ -22,6 +25,10 @@ export class Server {
     async start() {
         console.log('[Server] Starting server...');
 
+        // 初始化数据库
+        const database = Database.getInstance();
+        await database.open();
+
         // 启动HTTP服务器
         await this.httpServer.start();
 
@@ -29,9 +36,13 @@ export class Server {
         this.wsServer = new WebSocketServer({ port: this.wsPort });
         await this.wsServer.start();
 
-        // 启动文件监听器（需要传入messageHandler以获取工作区列表）
+        // 启动文件监听器（保留用于 artifact 文件变更检测）
         this.workspaceWatcher = new WorkspaceWatcher(this.wsServer, this.wsServer.messageHandler);
         this.workspaceWatcher.start();
+
+        // 启动数据库变更广播器（替代 chokidar 的实时更新）
+        this.changeBroadcaster = new ChangeBroadcaster(this.wsServer);
+        this.changeBroadcaster.start();
 
         console.log('[Server] Server started successfully');
         console.log(`[Server] HTTP: http://localhost:${this.httpPort}`);
@@ -49,6 +60,11 @@ export class Server {
             this.workspaceWatcher.stop();
         }
 
+        // 停止变更广播器
+        if (this.changeBroadcaster) {
+            this.changeBroadcaster.stop();
+        }
+
         // 停止WebSocket服务器
         if (this.wsServer) {
             await this.wsServer.stop();
@@ -56,6 +72,10 @@ export class Server {
 
         // 停止HTTP服务器
         await this.httpServer.stop();
+
+        // 关闭数据库
+        const database = Database.getInstance();
+        database.close();
 
         console.log('[Server] Server stopped');
     }

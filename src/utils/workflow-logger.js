@@ -1,12 +1,12 @@
 /**
  * Workflow Logger - 结构化JSON工作流日志
- * 记录用户与Agent的完整对话流程
+ * 使用 SQLite (LogRepository) 作为主存储，文件作为 fallback
  */
 
-import { open, readFile, stat } from 'fs/promises';
-import { writeFile } from 'fs/promises';
+import { open, readFile, stat, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { workspaceManager } from './workspace-manager.js';
+import { LogRepository } from '../db/log-repository.js';
 
 class WorkflowLogger {
     constructor() {
@@ -21,7 +21,9 @@ class WorkflowLogger {
             warn: console.warn,
             info: console.info
         };
-        this.writeLock = null; // 文件写入锁
+        this.writeLock = null;
+        this.logRepo = null;
+        this._useDb = false;
     }
 
     /**
@@ -50,16 +52,23 @@ class WorkflowLogger {
     async initialize(workspaceId) {
         this.workspaceId = workspaceId;
 
+        // Try to initialize LogRepository
+        try {
+            this.logRepo = new LogRepository(workspaceId);
+            this._useDb = true;
+        } catch (error) {
+            console.warn('[WorkflowLogger] Failed to init LogRepository, using file fallback:', error.message);
+            this._useDb = false;
+        }
+
         // 获取日志目录路径
         const logsPath = workspaceManager.getLogsPath();
 
         // 工作流日志文件名固定为 workflow.json
         this.logFilePath = join(logsPath, 'workflow.json');
-
-        // session.log 用于记录控制台输出
         this.sessionLogPath = join(logsPath, 'session.log');
 
-        // 如果文件已存在，读取现有内容；否则创建新文件
+        // Load existing buffer from file (for backward compat and fallback)
         try {
             const stats = await stat(this.logFilePath);
             if (stats.size > 0) {
@@ -68,47 +77,42 @@ class WorkflowLogger {
             } else {
                 this.buffer = [];
             }
-        } catch (e) {
-            // 文件不存在，创建新的空数组
+        } catch {
             this.buffer = [];
         }
 
-        // 初始化 session.log，写入开始标记
+        // 初始化 session.log
         const startTime = new Date().toISOString();
         await this._writeSessionLog(`[${startTime}] ===== Session Started: ${workspaceId} =====\n`);
 
         // 启动控制台输出拦截
         this._interceptConsole();
 
-        this.originalConsole.log(`[WorkflowLogger] Initialized: ${this.logFilePath}`);
+        this.originalConsole.log(`[WorkflowLogger] Initialized: ${this._useDb ? 'DB' : 'file'} mode`);
     }
 
     /**
-     * 拦截 console 输出，写入 session.log
+     * 拦截 console 输出
      * @private
      */
     _interceptConsole() {
         const self = this;
 
-        // 拦截 console.log
         console.log = function(...args) {
             self.originalConsole.log.apply(console, args);
             self._writeSessionLog(`[${new Date().toISOString()}] [LOG] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`);
         };
 
-        // 拦截 console.error
         console.error = function(...args) {
             self.originalConsole.error.apply(console, args);
             self._writeSessionLog(`[${new Date().toISOString()}] [ERROR] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`);
         };
 
-        // 拦截 console.warn
         console.warn = function(...args) {
             self.originalConsole.warn.apply(console, args);
             self._writeSessionLog(`[${new Date().toISOString()}] [WARN] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`);
         };
 
-        // 拦截 console.info
         console.info = function(...args) {
             self.originalConsole.info.apply(console, args);
             self._writeSessionLog(`[${new Date().toISOString()}] [INFO] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`);
@@ -132,6 +136,16 @@ class WorkflowLogger {
      */
     async _writeSessionLog(message) {
         if (!this.sessionLogPath) return;
+
+        // Also write to DB if available
+        if (this._useDb && this.logRepo) {
+            try {
+                this.logRepo.logToSession(message.trim());
+            } catch {
+                // Ignore DB errors
+            }
+        }
+
         try {
             const handle = await open(this.sessionLogPath, 'a');
             await handle.writeFile(message, 'utf-8');
@@ -142,8 +156,7 @@ class WorkflowLogger {
     }
 
     /**
-     * 手动写入 session.log（用于非 console 输出）
-     * @param {string} message - 消息内容
+     * 手动写入 session.log
      */
     async logToSession(message) {
         await this._writeSessionLog(`[${new Date().toISOString()}] ${message}\n`);
@@ -151,7 +164,6 @@ class WorkflowLogger {
 
     /**
      * 记录用户输入
-     * @param {string} content - 用户输入内容
      */
     async logUserInput(content) {
         const entry = {
@@ -164,8 +176,7 @@ class WorkflowLogger {
     }
 
     /**
-     * 记录Agent问题（QuestionAgent）
-     * @param {string} question - Agent问题
+     * 记录Agent问题
      */
     async logQuestion(question) {
         const entry = {
@@ -180,7 +191,6 @@ class WorkflowLogger {
 
     /**
      * 记录用户回答
-     * @param {string} answer - 用户回答
      */
     async logUserAnswer(answer) {
         const entry = {
@@ -194,9 +204,6 @@ class WorkflowLogger {
 
     /**
      * 记录Agent消息
-     * @param {string} agent - Agent名称
-     * @param {string} message - 消息内容
-     * @param {string} stage - 阶段
      */
     async logAgentMessage(agent, message, stage = null) {
         const entry = {
@@ -212,8 +219,6 @@ class WorkflowLogger {
 
     /**
      * 记录阶段变更
-     * @param {string} toStage - 目标阶段
-     * @param {string} fromStage - 起始阶段（可选）
      */
     async logStageChange(fromStage, toStage) {
         const entry = {
@@ -227,9 +232,6 @@ class WorkflowLogger {
 
     /**
      * 记录步骤开始
-     * @param {number} stepIndex - 步骤索引
-     * @param {string} stepName - 步骤名称
-     * @param {string} stepId - 步骤ID (如 step_1)
      */
     async logStepStart(stepIndex, stepName, stepId) {
         const entry = {
@@ -244,10 +246,6 @@ class WorkflowLogger {
 
     /**
      * 记录步骤完成
-     * @param {number} stepIndex - 步骤索引
-     * @param {string} stepName - 步骤名称
-     * @param {object} result - 步骤结果摘要
-     * @param {string} stepId - 步骤ID (如 step_1)
      */
     async logStepComplete(stepIndex, stepName, result = null, stepId) {
         const entry = {
@@ -266,8 +264,6 @@ class WorkflowLogger {
 
     /**
      * 记录错误
-     * @param {string} error - 错误信息
-     * @param {string} context - 错误上下文
      */
     async logError(error, context = null) {
         const entry = {
@@ -281,7 +277,6 @@ class WorkflowLogger {
 
     /**
      * 记录工作流完成
-     * @param {object} result - 完成结果
      */
     async logWorkflowComplete(result = null) {
         const entry = {
@@ -294,10 +289,8 @@ class WorkflowLogger {
 
     /**
      * 记录计划生成
-     * @param {object} plan - PlanAgent 生成的计划
      */
     async logPlanGenerated(plan) {
-        // 压缩计划数据，只保留关键信息用于显示
         const planSummary = this._compressPlan(plan);
         const entry = {
             type: 'plan_generated',
@@ -310,10 +303,6 @@ class WorkflowLogger {
         await this._appendEntry(entry);
     }
 
-    /**
-     * 压缩计划数据用于日志记录
-     * @private
-     */
     _compressPlan(plan) {
         const summary = {
             scope: plan.scope || {},
@@ -322,7 +311,6 @@ class WorkflowLogger {
             edges: plan.edges || []
         };
 
-        // 处理 steps 数组（串行模式）
         if (plan.steps && Array.isArray(plan.steps)) {
             summary.steps = plan.steps.map((step, index) => ({
                 step_id: step.step_id || `step_${index + 1}`,
@@ -333,7 +321,6 @@ class WorkflowLogger {
             }));
         }
 
-        // 处理 nodes（图模式）
         if (plan.nodes && typeof plan.nodes === 'object') {
             for (const [key, node] of Object.entries(plan.nodes)) {
                 summary.nodes[key] = {
@@ -350,8 +337,6 @@ class WorkflowLogger {
 
     /**
      * 记录技能调用
-     * @param {string} skillName - 技能名称
-     * @param {object} params - 技能参数
      */
     async logSkillCall(skillName, params) {
         const entry = {
@@ -365,8 +350,6 @@ class WorkflowLogger {
 
     /**
      * 记录技能执行结果
-     * @param {string} skillName - 技能名称
-     * @param {object} result - 执行结果
      */
     async logSkillResult(skillName, result) {
         const entry = {
@@ -379,37 +362,23 @@ class WorkflowLogger {
         await this._appendEntry(entry);
     }
 
-    /**
-     * 清理参数，移除敏感信息
-     * @private
-     */
     _sanitizeParams(params) {
         if (!params) return {};
         const sanitized = { ...params };
-        // 移除可能的敏感字段
         delete sanitized.apiKey;
         delete sanitized.API_KEY;
         return sanitized;
     }
 
-    /**
-     * 生成结果摘要
-     * @private
-     */
     _summarizeResult(result) {
         if (!result) return { note: 'Empty result' };
-
-        // 如果是字符串，取前500字符
         if (typeof result === 'string') {
             return { text: result.substring(0, 500), truncated: result.length > 500 };
         }
-
-        // 如果是对象，只保留关键字段
         if (typeof result === 'object') {
             const summary = {};
             for (const [key, value] of Object.entries(result)) {
                 if (key === 'data' || key === 'result') {
-                    // 特殊处理 data/result 字段
                     if (typeof value === 'string') {
                         summary[key] = value.substring(0, 300);
                         if (value.length > 300) summary[key] += '...';
@@ -424,14 +393,11 @@ class WorkflowLogger {
             }
             return summary;
         }
-
         return { value: String(result) };
     }
 
     /**
      * 记录 Scope 更新
-     * @param {object} updates - 更新的内容
-     * @param {string} stepId - 步骤ID
      */
     async logScopeUpdate(updates, stepId = null) {
         const entry = {
@@ -445,14 +411,12 @@ class WorkflowLogger {
 
     /**
      * 记录步骤思考
-     * @param {string} thought - 思考内容
-     * @param {number} stepIndex - 步骤索引
      */
     async logStepThought(thought, stepIndex = null) {
         const entry = {
             type: 'step_thought',
             stepIndex: stepIndex,
-            content: thought.substring(0, 1000), // 限制长度
+            content: thought.substring(0, 1000),
             timestamp: new Date().toISOString()
         };
         await this._appendEntry(entry);
@@ -460,9 +424,6 @@ class WorkflowLogger {
 
     /**
      * 记录步骤动作
-     * @param {string} action - 动作类型
-     * @param {object} details - 动作详情
-     * @param {number} stepIndex - 步骤索引
      */
     async logStepAction(action, details, stepIndex = null) {
         const entry = {
@@ -477,14 +438,12 @@ class WorkflowLogger {
 
     /**
      * 记录步骤观察结果
-     * @param {string} observation - 观察结果
-     * @param {number} stepIndex - 步骤索引
      */
     async logStepObservation(observation, stepIndex = null) {
         const entry = {
             type: 'step_observation',
             stepIndex: stepIndex,
-            content: observation.substring(0, 1000), // 限制长度
+            content: observation.substring(0, 1000),
             timestamp: new Date().toISOString()
         };
         await this._appendEntry(entry);
@@ -492,8 +451,6 @@ class WorkflowLogger {
 
     /**
      * 记录审查结果
-     * @param {object} reviewResult - 审查结果
-     * @param {number} stepIndex - 步骤索引
      */
     async logReviewResult(reviewResult, stepIndex = null) {
         const entry = {
@@ -508,14 +465,38 @@ class WorkflowLogger {
     }
 
     /**
-     * 添加日志条目
+     * 添加日志条目（双写：DB + 文件）
      * @private
      */
     async _appendEntry(entry) {
         this.buffer.push(entry);
 
-        // 实时刷新到文件
+        // Write to DB (synchronous, no lock needed)
+        if (this._useDb && this.logRepo) {
+            try {
+                this.logRepo._insertEntry(
+                    entry.type,
+                    entry.role || null,
+                    entry.agent || null,
+                    entry.content || null,
+                    this._extractEntryData(entry)
+                );
+            } catch (error) {
+                this.originalConsole.warn('[WorkflowLogger] DB write failed:', error.message);
+            }
+        }
+
+        // Also flush to file (backward compat during migration)
         await this._flush();
+    }
+
+    /**
+     * Extract type-specific data from entry for DB storage
+     * @private
+     */
+    _extractEntryData(entry) {
+        const { type, role, agent, content, timestamp, ...rest } = entry;
+        return Object.keys(rest).length > 0 ? rest : null;
     }
 
     /**
@@ -538,6 +519,13 @@ class WorkflowLogger {
      * 获取当前所有日志
      */
     getLogs() {
+        if (this._useDb && this.logRepo) {
+            try {
+                return this.logRepo.getLogs();
+            } catch {
+                // Fallback to buffer
+            }
+        }
         return [...this.buffer];
     }
 
@@ -556,17 +544,21 @@ class WorkflowLogger {
     }
 
     /**
+     * 获取底层 LogRepository
+     */
+    getLogRepository() {
+        return this.logRepo;
+    }
+
+    /**
      * 关闭日志
      */
     async close() {
-        // 写入结束标记
         const endTime = new Date().toISOString();
         await this._writeSessionLog(`[${endTime}] ===== Session Ended =====\n`);
 
-        // 恢复原始 console
         this._restoreConsole();
 
-        // 确保最后的数据写入
         await this._flush();
         this.originalConsole.log('[WorkflowLogger] Closed');
     }

@@ -1,5 +1,6 @@
 /**
  * ScopeCoordinator 单元测试
+ * Updated for SQLite-backed ScopeCoordinator
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -10,9 +11,10 @@ describe('ScopeCoordinator - Scope 协调器', () => {
     let coordinator;
 
     beforeEach(() => {
-        // Mock ScopeManager
+        // Mock ScopeManager with getScopeRepository returning null (fallback path)
         scopeManager = {
             _data: {},
+            getScopeRepository: vi.fn().mockReturnValue(null),
             get() {
                 return this._data;
             },
@@ -78,56 +80,26 @@ describe('ScopeCoordinator - Scope 协调器', () => {
             expect(scopeManager._data.nested.b).toBe(3);
             expect(scopeManager._data.nested.c).toBe(4);
         });
-
-        it('应正确释放锁', async () => {
-            await coordinator.acquireWrite('task_1', { field1: 'value1' });
-
-            // 锁应该在写入后释放（返回 falsy）
-            expect(coordinator.isFieldLocked('field1')).toBeFalsy();
-        });
-    });
-
-    describe('字段锁机制', () => {
-        it('应正确追踪字段锁定状态', async () => {
-            await coordinator.acquireWrite('task_1', { field1: 'value1' });
-
-            // 写入后锁已释放（返回 falsy）
-            expect(coordinator.isFieldLocked('field1')).toBeFalsy();
-        });
-
-        it('应获取字段的锁定者', async () => {
-            const taskLocks = coordinator.getTaskLocks('task_1');
-
-            expect(taskLocks).toBeDefined();
-        });
-
-        it('应获取任务持有的锁', async () => {
-            const locks = coordinator.getTaskLocks('task_1');
-
-            expect(locks).toBeInstanceOf(Set);
-        });
     });
 
     describe('getLockStatus - 锁状态', () => {
-        it('应返回当前锁状态', async () => {
+        it('应返回空锁状态（SQLite 无需应用层锁）', async () => {
             await coordinator.acquireWrite('task_1', { field1: 'value1' });
 
             const status = coordinator.getLockStatus();
 
             expect(status).toHaveProperty('lockedFields');
             expect(status).toHaveProperty('taskLocks');
+            expect(status.lockedFields).toHaveLength(0);
+            expect(Object.keys(status.taskLocks)).toHaveLength(0);
         });
     });
 
     describe('reset - 重置', () => {
-        it('应清除所有锁', async () => {
-            await coordinator.acquireWrite('task_1', { field1: 'value1' });
-
+        it('应能正常调用（无操作）', () => {
             coordinator.reset();
-
             const status = coordinator.getLockStatus();
             expect(status.lockedFields).toHaveLength(0);
-            expect(Object.keys(status.taskLocks)).toHaveLength(0);
         });
     });
 
@@ -142,6 +114,32 @@ describe('ScopeCoordinator - Scope 协调器', () => {
 
             expect(result1.counter).toBe(0);
             expect(result2.counter).toBe(0);
+        });
+    });
+
+    describe('ScopeRepository 路径', () => {
+        it('应使用 ScopeRepository.readFields 读取指定字段', async () => {
+            const mockRepo = {
+                readFields: vi.fn().mockReturnValue({ a: 1, c: 3 }),
+            };
+            scopeManager.getScopeRepository.mockReturnValue(mockRepo);
+
+            const result = await coordinator.acquireRead('task_1', ['a', 'c']);
+
+            expect(mockRepo.readFields).toHaveBeenCalledWith(['a', 'c']);
+            expect(result.a).toBe(1);
+            expect(result.c).toBe(3);
+        });
+
+        it('应使用 ScopeRepository.updateFields 写入', async () => {
+            const mockRepo = {
+                updateFields: vi.fn(),
+            };
+            scopeManager.getScopeRepository.mockReturnValue(mockRepo);
+
+            await coordinator.acquireWrite('task_1', { field1: 'value1' });
+
+            expect(mockRepo.updateFields).toHaveBeenCalledWith('task_1', { field1: 'value1' });
         });
     });
 });

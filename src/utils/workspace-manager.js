@@ -8,6 +8,7 @@
 import { mkdir } from 'fs/promises';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
+import { Database } from '../db/database.js';
 
 /**
  * Workspace Manager Singleton
@@ -70,6 +71,19 @@ export class WorkspaceManager {
             await mkdir(join(this.workspacePath, 'reports'), { recursive: true });
 
             this.initialized = true;
+
+            // Also register in SQLite database
+            try {
+                const database = Database.getInstance();
+                const db = database.getDb();
+                db.prepare(`
+                    INSERT OR IGNORE INTO workspaces (id, title, status)
+                    VALUES (?, ?, 'idle')
+                `).run(this.workspaceId, this.workspaceId);
+            } catch (dbError) {
+                console.warn('[WorkspaceManager] Failed to register workspace in DB:', dbError.message);
+            }
+
             console.log(`[WorkspaceManager] Initialized workspace: ${this.workspaceId}`);
         } catch (error) {
             console.error('[WorkspaceManager] Failed to initialize workspace:', error.message);
@@ -152,6 +166,19 @@ export class WorkspaceManager {
         await mkdir(join(this.workspacePath, 'reports'), { recursive: true });
 
         this.initialized = true;
+
+        // Also register in SQLite database (INSERT OR IGNORE in case it already exists)
+        try {
+            const database = Database.getInstance();
+            const db = database.getDb();
+            db.prepare(`
+                INSERT OR IGNORE INTO workspaces (id, title, status)
+                VALUES (?, ?, 'idle')
+            `).run(this.workspaceId, this.workspaceId);
+        } catch (dbError) {
+            console.warn('[WorkspaceManager] Failed to register workspace in DB:', dbError.message);
+        }
+
         console.log(`[WorkspaceManager] Set workspace: ${this.workspaceId}`);
     }
 

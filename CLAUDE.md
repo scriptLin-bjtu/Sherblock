@@ -149,11 +149,25 @@ Each skill exports `default` object with:
 Each task execution creates a unique workspace directory to isolate task files:
 - Workspace ID format: `workspace-YYYYMMDD-HHmmss-{random}`
 - Workspace structure:
+  - `data/sherblock.db` - SQLite database (primary data store)
   - `data/{workspaceId}/` - Root workspace directory
-  - `data/{workspaceId}/logs/` - Execution logs
-  - `data/{workspaceId}/charts/` - Generated charts
-  - `data/{workspaceId}/reports/` - Generated reports
-  - `data/{workspaceId}/scope.json` - Persisted scope for debugging
+  - `data/{workspaceId}/charts/` - Generated charts (SVG files)
+  - `data/{workspaceId}/reports/` - Generated reports (Markdown files)
+
+### Data Storage (`src/db/`)
+
+SQLite-based storage using `better-sqlite3` with WAL mode for concurrent access:
+
+- **Database** (`src/db/database.js`): Connection management, schema migrations, PRAGMA config
+- **WorkspaceRepository** (`src/db/workspace-repository.js`): Workspace CRUD + filesystem directory creation
+- **ScopeRepository** (`src/db/scope-repository.js`): Key-value scope storage with field-level concurrent writes
+- **LogRepository** (`src/db/log-repository.js`): Row-level log insertion (replaces full-file rewrite)
+- **ArtifactRepository** (`src/db/artifact-repository.js`): Chart/report metadata tracking (files remain on disk)
+- **ChangeBroadcaster** (`src/db/change-broadcaster.js`): Polls change_log table for real-time WebSocket updates
+
+Database tables: `workspaces`, `scope_entries`, `workflow_logs`, `session_logs`, `artifacts`, `change_log`
+
+Migration script: `node scripts/migrate-to-sqlite.js` — imports existing file-based data into SQLite
 
 ### Web Interface (Frontend)
 
@@ -200,11 +214,12 @@ CompressionManager coordinates all compression operations:
 ## Dependencies
 
 Key backend dependencies:
+- `better-sqlite3` - SQLite database driver (synchronous API, WAL mode)
 - `undici` - HTTP/1.1 client for making requests (includes ProxyAgent support)
 - `dotenv` - Environment variable management
 - `express` - HTTP server framework
 - `ws` - WebSocket server
-- `chokidar` - File system watcher
+- `chokidar` - File system watcher (artifact file changes)
 - `p-limit` - Promise concurrency limiter (for parallel execution)
 - `canvas` - Canvas implementation for Node.js (chart rendering)
 - `vega` - Visualization grammar for chart generation
@@ -285,10 +300,17 @@ src/
 ├── index.js                    # Main entry point, agent initialization
 ├── server-index.js             # Server entry point (HTTP + WebSocket)
 ├── test.js                     # Etherscan API test script
+├── db/                         # SQLite data storage layer
+│   ├── database.js             # Connection management, schema, PRAGMA
+│   ├── workspace-repository.js # Workspace CRUD + directory creation
+│   ├── scope-repository.js     # Key-value scope storage with field-level writes
+│   ├── log-repository.js       # Row-level log insertion
+│   ├── artifact-repository.js  # Chart/report metadata tracking
+│   └── change-broadcaster.js   # Real-time change notifications via change_log polling
 ├── utils/
-│   ├── workspace-manager.js    # Workspace directory management
-│   ├── scope-manager.js        # Scope persistence to JSON file
-│   ├── workflow-logger.js      # Workflow event logging
+│   ├── workspace-manager.js    # Workspace directory management (backed by DB)
+│   ├── scope-manager.js        # Scope persistence (backed by DB + file compat)
+│   ├── workflow-logger.js      # Workflow event logging (backed by DB + file compat)
 │   └── dag-utils.js            # DAG utility functions
 ├── services/
 │   └── agent.js                # LLM service with multi-provider support
@@ -296,7 +318,7 @@ src/
 │   ├── index.js                # Server core
 │   ├── http-server.js          # HTTP server
 │   ├── websocket-server.js     # WebSocket server
-│   ├── workspace-watcher.js    # File system watcher
+│   ├── workspace-watcher.js    # File system watcher (artifact files)
 │   └── message-handler.js      # Client message processing
 └── agents/
     ├── questionBot/

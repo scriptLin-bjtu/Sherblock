@@ -31,6 +31,9 @@ describe('ParallelExecutionEngine - 并行执行引擎', () => {
             get() {
                 return this._data;
             },
+            getScopeRepository() {
+                return null; // Fallback to in-memory mode in tests
+            },
             async read() {
                 // 模拟从文件读取
             },
