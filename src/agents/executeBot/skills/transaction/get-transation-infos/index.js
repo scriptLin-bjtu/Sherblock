@@ -7,7 +7,7 @@
  * then decodes the function name and parameters. Handles proxy contracts automatically.
  */
 
-import { ethers } from "ethers";
+import { Interface } from "ethers";
 import {
     buildEtherscanUrl,
     callEtherscanApi,
@@ -189,7 +189,7 @@ export default {
             const parsedAbi = this.parseAbi(abi);
 
             // 5. Decode contract call
-            const iface = new ethers.utils.Interface(parsedAbi);
+            const iface = new Interface(parsedAbi);
             const parsedTx = iface.parseTransaction({ data: input });
 
             // 6. Format result
@@ -205,7 +205,7 @@ export default {
                 },
                 parameters: this.formatParameters(
                     parsedTx.args,
-                    parsedTx.functionFragment.inputs,
+                    parsedTx.fragment.inputs,
                 ),
                 transaction: {
                     from: tx.from,
@@ -373,15 +373,6 @@ export default {
                 wei,
                 eth: eth.toString(),
                 ethNumber: Number(eth),
-            };
-        }
-
-        // Handle ethers BigNumber
-        if (ethers.BigNumber.isBigNumber(value)) {
-            return {
-                hex: value.toHexString(),
-                number: value.toString(),
-                decimal: value.toNumber(),
             };
         }
 
