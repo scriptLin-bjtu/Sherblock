@@ -2559,11 +2559,9 @@ function addFloatingDAGContainer() {
  * Initialize DAG interaction handlers
  */
 function initDAGInteractions() {
-    // Remove existing overlay if any
-    const existingOverlay = document.querySelector(".dag-preview-overlay");
-    if (existingOverlay) {
-        existingOverlay.remove();
-    }
+    // Do NOT remove existing overlay - it would close the user's DAG preview
+    // when renderMessages() is called during step completion.
+    // showDAGPreview() already handles removing stale overlays before creating new ones.
 
     // Preview button - use current state to regenerate SVG with statuses
     document.querySelectorAll(".dag-preview-btn").forEach((btn) => {
@@ -3850,6 +3848,19 @@ function updateDAGNodeStatus(stepName, status) {
         const header = container.querySelector(".dag-floating-header span");
         if (header) {
             header.textContent = `📋 Execution Plan (${completedCount}/${stepCount} completed)`;
+        }
+    }
+
+    // Also update DAG preview overlay if open (without closing it)
+    const previewOverlay = document.querySelector(".dag-preview-overlay");
+    if (previewOverlay && state.dagPositionedNodes && state.dagLayoutEdges) {
+        const svg = generateSVG(state.dagPositionedNodes, state.dagLayoutEdges, {}, state.dagNodeStatuses);
+        // Only replace the SVG content inside .dag-canvas, preserving pan/zoom state
+        const canvas = previewOverlay.querySelector(".dag-canvas");
+        if (canvas) {
+            canvas.innerHTML = svg;
+            // Re-attach node click handlers for updated nodes
+            initDAGNodeClick(previewOverlay);
         }
     }
 }
