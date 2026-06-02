@@ -269,20 +269,23 @@ npm run dev
 
 ## Configuration
 
-Environment variables (in `.env`):
-- `BIGMODEL_API_KEY` - GLM API key
-- `DEEPSEEK_API_KEY` - DeepSeek API key
-- `ETHERSCAN_API_KEY` - Etherscan API key
+Environment variables (in `.env`), see `.env.example` for template:
+
+**Required:**
+- `DEEPSEEK_API_KEY` - DeepSeek API key (used by QuestionAgent, PlanAgent, ExecuteAgent)
+- `ETHERSCAN_API_KEY` - Etherscan API key (used by blockchain data query skills)
+
+**Network (optional):**
 - `HTTP_PROXY` - Proxy URL (defaults to `http://127.0.0.1:7890`)
 
-**Server configuration** (optional):
-- `HTTP_PORT` - HTTP server port (default: 3000)
-- `WS_PORT` - WebSocket server port (default: 8080)
-
-**Parallel execution configuration** (optional):
+**Parallel execution configuration (optional):**
 - `MAX_PARALLEL_TASKS` - Maximum parallel tasks (default: 3)
 - `USE_PARALLEL_EXECUTION` - Enable parallel mode (`true`/`false`)
 - `CONTINUE_ON_FAILURE` - Continue on failure (`true`/`false`)
+- `ENABLE_REVIEW_IN_PARALLEL` - Enable review phase in parallel mode (`true`/`false`)
+
+**Debug (optional):**
+- `COMPRESSION_DEBUG` - Enable compression debug logging (`true`/`false`)
 
 **Note**: The `.env` file and `data/` directory are excluded from git (see `.gitignore`). Create `.env` locally with your API keys.
 
