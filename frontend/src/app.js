@@ -4098,6 +4098,7 @@ async function selectWorkspace(workspaceId) {
     stopAutoRefresh();
 
     state.selectedWorkspaceId = workspaceId;
+    sessionStorage.setItem('sherblock_lastWorkspaceId', workspaceId);
     state.messages = [];
     state.workflowLogs = []; // Clear workflow logs
     state.isWorkflowCompleted = false; // Reset completion status
@@ -4742,6 +4743,12 @@ function initWebSocketEvents() {
         updateConnectionStatus("connected");
         // Request workspace list
         websocketService.send({ type: "GET_WORKSPACES" });
+
+        // Auto-select previously active workspace (recovery from page refresh)
+        const lastWorkspaceId = sessionStorage.getItem('sherblock_lastWorkspaceId');
+        if (lastWorkspaceId) {
+            selectWorkspace(lastWorkspaceId);
+        }
     });
 
     websocketService.on("disconnected", () => {
@@ -4750,6 +4757,60 @@ function initWebSocketEvents() {
 
     websocketService.on("error", (data) => {
         console.error("WebSocket error:", data);
+    });
+
+    // Analysis reconnected - existing workflow was found on server
+    websocketService.on("ANALYSIS_RECONNECTED", (data) => {
+        const payload = data.payload || data;
+        const { workspaceId, stage } = payload;
+
+        if (workspaceId !== state.selectedWorkspaceId) return;
+
+        state.isAnalyzing = true;
+        state.awaitingUserInput = false;
+        state.isWorkflowCompleted = false;
+
+        updateInputState();
+        updateWorkflowControls("running");
+    });
+
+    // Workflow state recovery - full state from server after reconnection
+    websocketService.on("WORKFLOW_STATE_RECOVERY", (data) => {
+        const payload = data.payload || data;
+        const { workspaceId, stage, isAwaitingInput, lastQuestion } = payload;
+
+        if (workspaceId !== state.selectedWorkspaceId) return;
+
+        state.stage = stage || 'idle';
+        state.isAnalyzing = true;
+        state.awaitingUserInput = isAwaitingInput || false;
+        state.isWorkflowCompleted = false;
+
+        updateStageIndicator(state.stage);
+
+        if (state.awaitingUserInput) {
+            updateWorkflowControls("none");
+        } else if (['executing', 'planning', 'collecting'].includes(state.stage)) {
+            updateWorkflowControls("running");
+        }
+
+        updateInputState();
+
+        // Re-display pending question if awaiting input
+        if (isAwaitingInput && lastQuestion) {
+            const alreadyHasQuestion = state.messages.some(
+                m => m.type === 'agent' && m.content === lastQuestion
+            );
+            if (!alreadyHasQuestion) {
+                addMessage({
+                    type: "agent",
+                    agentType: "QuestionAgent",
+                    content: lastQuestion,
+                    requiresInput: true,
+                    timestamp: new Date().toISOString(),
+                });
+            }
+        }
     });
 
     // Workspace created - record new workspace and request list refresh

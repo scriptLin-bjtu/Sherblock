@@ -140,6 +140,24 @@ export default class MessageHandler {
         // 订阅该工作区
         this.wsServer.subscribeToWorkspace(clientId, workspaceId);
 
+        // 如果该 workspace 有活跃 adapter，重连到新客户端
+        const activeAdapter = this.activeWorkflows.get(workspaceId);
+        if (activeAdapter) {
+            activeAdapter.reconnect(clientId);
+
+            // 发送状态恢复消息，帮助前端恢复 UI（如待回答的问题）
+            const adapterState = activeAdapter.getStateRecovery();
+            if (adapterState.isAwaitingInput || ['collecting', 'planning', 'executing'].includes(adapterState.stage)) {
+                // 异步发送，不阻塞当前响应
+                setImmediate(() => {
+                    this.wsServer.send(clientId, 'WORKFLOW_STATE_RECOVERY', {
+                        workspaceId,
+                        ...adapterState,
+                    });
+                });
+            }
+        }
+
         const workspacePath = join(process.cwd(), 'data', workspaceId);
 
         try {
@@ -160,7 +178,7 @@ export default class MessageHandler {
                     charts,
                     reports,
                     logs,
-                    workflowStatus: workspaceInfo?.workflowStatus
+                    workflowStatus: this._overlayActiveAdapterState(workspaceId, workspaceInfo?.workflowStatus)
                 }
             };
         } catch (error) {
@@ -272,6 +290,53 @@ export default class MessageHandler {
             throw new Error('input is required');
         }
 
+        // 检查是否已有活跃的工作流
+        const existingAdapter = this.activeWorkflows.get(workspaceId);
+        if (existingAdapter) {
+            const adapterState = existingAdapter.getStateRecovery();
+
+            if (adapterState.isAwaitingInput) {
+                // 重连：更新 adapter 的 clientId，将用户消息作为回答
+                console.log(`[MessageHandler] Reconnecting existing workflow for workspace ${workspaceId}`);
+
+                existingAdapter.reconnect(clientId);
+                existingAdapter.handleUserInput(input);
+
+                // 发送状态恢复消息给新客户端
+                this.wsServer.send(clientId, 'WORKFLOW_STATE_RECOVERY', {
+                    workspaceId,
+                    ...adapterState,
+                });
+
+                return {
+                    id: message.id,
+                    type: 'ANALYSIS_RECONNECTED',
+                    timestamp: Date.now(),
+                    payload: { workspaceId, stage: adapterState.stage }
+                };
+            } else if (['collecting', 'planning', 'executing'].includes(adapterState.stage)) {
+                // 活跃工作流但不在等待输入（如 LLM 处理中）
+                // 重连事件通道，但不喂入用户输入
+                console.log(`[MessageHandler] Reconnecting existing workflow (stage: ${adapterState.stage}) for workspace ${workspaceId}`);
+
+                existingAdapter.reconnect(clientId);
+
+                // 发送状态恢复消息
+                this.wsServer.send(clientId, 'WORKFLOW_STATE_RECOVERY', {
+                    workspaceId,
+                    ...adapterState,
+                });
+
+                return {
+                    id: message.id,
+                    type: 'ANALYSIS_RECONNECTED',
+                    timestamp: Date.now(),
+                    payload: { workspaceId, stage: adapterState.stage }
+                };
+            }
+            // 如果工作流已完成或空闲，继续创建新 adapter
+        }
+
         console.log(`[MessageHandler] Starting analysis for workspace ${workspaceId}`);
 
         // 创建Orchestrator适配器（默认启用并行执行）
@@ -285,12 +350,15 @@ export default class MessageHandler {
         this.activeWorkflows.set(workspaceId, adapter);
 
         // 异步启动分析
-        adapter.run(input).catch(error => {
+        adapter.run(input).then(result => {
+            this.activeWorkflows.delete(workspaceId);
+        }).catch(error => {
             console.error(`[MessageHandler] Analysis error:`, error);
             this.wsServer.send(clientId, 'ERROR', {
                 workspaceId,
                 error: error.message
             });
+            this.activeWorkflows.delete(workspaceId);
         });
 
         return {
@@ -612,6 +680,27 @@ export default class MessageHandler {
     // ============ 辅助方法 ============
 
     /**
+     * 叠加内存中活跃 adapter 的实时状态到 workflowStatus
+     * @private
+     */
+    _overlayActiveAdapterState(workspaceId, workflowStatus) {
+        const adapter = this.activeWorkflows.get(workspaceId);
+        if (!adapter) return workflowStatus;
+
+        const adapterState = adapter.getStateRecovery();
+        if (!workflowStatus) {
+            workflowStatus = {};
+        }
+
+        // 内存中的 adapter 状态优先
+        workflowStatus.isRunning = true;
+        workflowStatus.awaitingUserInput = adapterState.isAwaitingInput;
+        workflowStatus.stage = adapterState.stage;
+
+        return workflowStatus;
+    }
+
+    /**
      * 列出所有工作区（优先从数据库查询）
      */
     async listWorkspaces() {
@@ -694,7 +783,7 @@ export default class MessageHandler {
                         hasReports,
                         hasLogs: true,
                         scope,
-                        workflowStatus,
+                        workflowStatus: this._overlayActiveAdapterState(row.id, workflowStatus),
                         isCompleted,
                     });
                 }
