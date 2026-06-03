@@ -7,3 +7,4 @@ thesis
 *.bcf
 *.xml
 .playwright-mcp
+.VSCodeCounter
