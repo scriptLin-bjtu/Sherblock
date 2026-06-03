@@ -161,12 +161,14 @@ export default class MessageHandler {
         const workspacePath = join(process.cwd(), 'data', workspaceId);
 
         try {
-            const [workspaceInfo, charts, reports, logs] = await Promise.all([
+            const [workspaceInfo, charts, reports] = await Promise.all([
                 this.getWorkspaceInfo(workspacePath, workspaceId),
                 this.readFiles(workspacePath, 'charts'),
-                this.readFiles(workspacePath, 'reports'),
-                this.readFiles(workspacePath, 'logs')
+                this.readFiles(workspacePath, 'reports')
             ]);
+
+            // logs 从 SQLite session_logs 表读取
+            const logs = this._readSessionLogs(workspaceId);
 
             return {
                 id: message.id,
@@ -541,12 +543,11 @@ export default class MessageHandler {
     }
 
     /**
-     * 获取工作流日志（JSON格式）- 优先从数据库查询
+     * 获取工作流日志（JSON格式）- DB-only
      */
     async handleGetWorkflowLog(message) {
         const { workspaceId } = message.payload;
 
-        // Try database first
         try {
             const db = Database.getInstance().getDb();
             const rows = db.prepare(`
@@ -555,45 +556,18 @@ export default class MessageHandler {
                 ORDER BY timestamp ASC
             `).all(workspaceId);
 
-            if (rows.length > 0) {
-                const logs = rows.map(row => {
-                    const entry = { type: row.entry_type, timestamp: row.timestamp };
-                    if (row.role) entry.role = row.role;
-                    if (row.agent) entry.agent = row.agent;
-                    if (row.content) entry.content = row.content;
-                    if (row.entry_data) {
-                        try {
-                            Object.assign(entry, JSON.parse(row.entry_data));
-                        } catch { /* ignore */ }
-                    }
-                    return entry;
-                });
-
-                return {
-                    id: message.id,
-                    type: 'WORKFLOW_LOG_CONTENT',
-                    timestamp: Date.now(),
-                    payload: { workspaceId, logs }
-                };
-            }
-        } catch (error) {
-            console.warn('[MessageHandler] DB query for workflow log failed, falling back to file:', error.message);
-        }
-
-        // Fallback: file-based read
-        const workspacePath = join(process.cwd(), 'data', workspaceId);
-        const logPath = join(workspacePath, 'logs', 'workflow.json');
-
-        try {
-            const content = await readFile(logPath, 'utf-8');
-            let logs;
-
-            try {
-                logs = JSON.parse(content);
-            } catch (parseError) {
-                console.warn('[MessageHandler] JSON parse failed, attempting repair:', parseError.message);
-                logs = this._tryRepairJson(content);
-            }
+            const logs = rows.map(row => {
+                const entry = { type: row.entry_type, timestamp: row.timestamp };
+                if (row.role) entry.role = row.role;
+                if (row.agent) entry.agent = row.agent;
+                if (row.content) entry.content = row.content;
+                if (row.entry_data) {
+                    try {
+                        Object.assign(entry, JSON.parse(row.entry_data));
+                    } catch { /* ignore */ }
+                }
+                return entry;
+            });
 
             return {
                 id: message.id,
@@ -602,79 +576,8 @@ export default class MessageHandler {
                 payload: { workspaceId, logs }
             };
         } catch (error) {
-            if (error.code === 'ENOENT') {
-                return {
-                    id: message.id,
-                    type: 'WORKFLOW_LOG_CONTENT',
-                    timestamp: Date.now(),
-                    payload: { workspaceId, logs: [] }
-                };
-            }
             throw new Error(`Failed to read workflow log: ${error.message}`);
         }
-    }
-
-    /**
-     * 尝试修复损坏的 JSON
-     * @private
-     */
-    _tryRepairJson(content) {
-        // 策略：找到最后一个闭合的 ] 作为数组结束
-        // 从文件末尾开始搜索，定位到完整的 JSON 数组
-        const lines = content.split('\n');
-        let validJson = [];
-        let current = [];
-        let braceCount = 0;
-        let bracketCount = 0;
-        let inString = false;
-        let escapeNext = false;
-
-        for (const line of lines) {
-            for (let i = 0; i < line.length; i++) {
-                const char = line[i];
-
-                if (escapeNext) {
-                    escapeNext = false;
-                    continue;
-                }
-                if (char === '\\' && inString) {
-                    escapeNext = true;
-                    continue;
-                }
-                if (char === '"') {
-                    inString = !inString;
-                    continue;
-                }
-
-                if (!inString) {
-                    if (char === '{') braceCount++;
-                    else if (char === '}') braceCount--;
-                    else if (char === '[') bracketCount++;
-                    else if (char === ']') bracketCount--;
-                }
-            }
-
-            // 尝试解析当前累积的行
-            try {
-                const testJson = JSON.parse(current.join('\n'));
-                if (Array.isArray(testJson)) {
-                    validJson = testJson;
-                }
-            } catch {
-                // 当前不完整，继续累积
-            }
-
-            current.push(line);
-        }
-
-        // 如果无法修复，返回空数组
-        if (validJson.length === 0) {
-            console.warn('[MessageHandler] Could not repair JSON, returning empty array');
-            return [];
-        }
-
-        console.log(`[MessageHandler] Repaired JSON, recovered ${validJson.length} entries`);
-        return validJson;
     }
 
     // ============ 辅助方法 ============
@@ -713,157 +616,87 @@ export default class MessageHandler {
                 ORDER BY w.created_at DESC
             `).all();
 
-            if (rows.length > 0) {
-                const workspaces = [];
-                for (const row of rows) {
-                    const workspacePath = join(process.cwd(), 'data', row.id);
-                    const hasCharts = await this.hasFiles(workspacePath, 'charts');
-                    const hasReports = await this.hasFiles(workspacePath, 'reports');
-
-                    // Try to read scope from DB (scope_repository) or file
-                    let scope = null;
-                    try {
-                        const scopeRows = db.prepare(
-                            'SELECT scope_key, scope_value FROM scope_entries WHERE workspace_id = ?'
-                        ).all(row.id);
-                        if (scopeRows.length > 0) {
-                            scope = {};
-                            for (const sr of scopeRows) {
-                                scope[sr.scope_key] = JSON.parse(sr.scope_value);
-                            }
-                        } else {
-                            scope = await this.readScope(workspacePath);
-                        }
-                    } catch {
-                        scope = await this.readScope(workspacePath);
-                    }
-
-                    // Read workflow status
-                    let workflowStatus = null;
-                    let isCompleted = false;
-                    try {
-                        const lastLog = db.prepare(`
-                            SELECT entry_type, entry_data FROM workflow_logs
-                            WHERE workspace_id = ?
-                            ORDER BY timestamp DESC LIMIT 1
-                        `).get(row.id);
-                        if (lastLog) {
-                            isCompleted = lastLog.entry_type === 'workflow_completed';
-                        }
-
-                        // Determine stage from logs
-                        const stageLog = db.prepare(`
-                            SELECT entry_type, entry_data FROM workflow_logs
-                            WHERE workspace_id = ? AND entry_type = 'stage_change'
-                            ORDER BY timestamp DESC LIMIT 1
-                        `).get(row.id);
-
-                        workflowStatus = {
-                            stage: stageLog ? JSON.parse(stageLog.entry_data || '{}').to : (row.status !== 'idle' ? row.status : 'idle'),
-                            isRunning: row.status !== 'idle' && row.status !== 'completed',
-                            awaitingUserInput: false,
-                        };
-                    } catch {
-                        // Fall back to file-based workflow status
-                        try {
-                            const workflowInfo = await this._getWorkflowStatusFromFile(workspacePath);
-                            workflowStatus = workflowInfo.status;
-                            isCompleted = workflowInfo.isCompleted;
-                        } catch {
-                            // Ignore
-                        }
-                    }
-
-                    workspaces.push({
-                        workspaceId: row.id,
-                        createdAt: new Date(row.created_at).getTime(),
-                        title: row.title || scope?.basic_infos?.user_questions?.[0] ||
-                            scope?.basic_infos?.goal || row.id,
-                        hasCharts,
-                        hasReports,
-                        hasLogs: true,
-                        scope,
-                        workflowStatus: this._overlayActiveAdapterState(row.id, workflowStatus),
-                        isCompleted,
-                    });
-                }
-                return workspaces;
-            }
-        } catch (error) {
-            console.warn('[MessageHandler] DB query failed, falling back to filesystem:', error.message);
-        }
-
-        // Fallback: filesystem scan (original logic)
-        return this._listWorkspacesFromFilesystem();
-    }
-
-    /**
-     * 从文件系统扫描工作区列表（fallback）
-     */
-    async _listWorkspacesFromFilesystem() {
-        const dataDir = join(process.cwd(), 'data');
-
-        try {
-            const entries = await readdir(dataDir, { withFileTypes: true });
             const workspaces = [];
+            for (const row of rows) {
+                const workspacePath = join(process.cwd(), 'data', row.id);
+                const hasCharts = await this.hasFiles(workspacePath, 'charts');
+                const hasReports = await this.hasFiles(workspacePath, 'reports');
 
-            for (const entry of entries) {
-                if (entry.isDirectory() && entry.name.startsWith('workspace-')) {
-                    const workspacePath = join(dataDir, entry.name);
-                    const workspaceInfo = await this.getWorkspaceInfo(workspacePath, entry.name);
-
-                    if (workspaceInfo) {
-                        workspaces.push(workspaceInfo);
+                // Read scope from DB (scope_entries)
+                let scope = null;
+                try {
+                    const scopeRows = db.prepare(
+                        'SELECT scope_key, scope_value FROM scope_entries WHERE workspace_id = ?'
+                    ).all(row.id);
+                    if (scopeRows.length > 0) {
+                        scope = {};
+                        for (const sr of scopeRows) {
+                            scope[sr.scope_key] = JSON.parse(sr.scope_value);
+                        }
                     }
+                } catch {
+                    // ignore — scope simply absent
                 }
-            }
 
-            return workspaces.sort((a, b) => b.createdAt - a.createdAt);
+                // Read workflow status from DB
+                let workflowStatus = null;
+                let isCompleted = false;
+                try {
+                    const lastLog = db.prepare(`
+                        SELECT entry_type, entry_data FROM workflow_logs
+                        WHERE workspace_id = ?
+                        ORDER BY timestamp DESC LIMIT 1
+                    `).get(row.id);
+                    if (lastLog) {
+                        isCompleted = lastLog.entry_type === 'workflow_completed';
+                    }
+
+                    const stageLog = db.prepare(`
+                        SELECT entry_type, entry_data FROM workflow_logs
+                        WHERE workspace_id = ? AND entry_type = 'stage_change'
+                        ORDER BY timestamp DESC LIMIT 1
+                    `).get(row.id);
+
+                    workflowStatus = {
+                        stage: stageLog ? JSON.parse(stageLog.entry_data || '{}').to : (row.status !== 'idle' ? row.status : 'idle'),
+                        isRunning: row.status !== 'idle' && row.status !== 'completed',
+                        awaitingUserInput: false,
+                    };
+                } catch {
+                    // ignore — leave workflowStatus null
+                }
+
+                // hasLogs: workflow_logs 表里是否有任何条目
+                let hasLogs = false;
+                try {
+                    const cnt = db.prepare(
+                        'SELECT 1 FROM workflow_logs WHERE workspace_id = ? LIMIT 1'
+                    ).get(row.id);
+                    hasLogs = !!cnt;
+                } catch { /* ignore */ }
+
+                workspaces.push({
+                    workspaceId: row.id,
+                    createdAt: new Date(row.created_at).getTime(),
+                    title: row.title || scope?.basic_infos?.user_questions?.[0] ||
+                        scope?.basic_infos?.goal || row.id,
+                    hasCharts,
+                    hasReports,
+                    hasLogs,
+                    scope,
+                    workflowStatus: this._overlayActiveAdapterState(row.id, workflowStatus),
+                    isCompleted,
+                });
+            }
+            return workspaces;
         } catch (error) {
-            if (error.code === 'ENOENT') {
-                return [];
-            }
-            throw error;
+            console.error('[MessageHandler] listWorkspaces DB query failed:', error.message);
+            return [];
         }
     }
 
     /**
-     * 从文件读取工作流状态（fallback）
-     */
-    async _getWorkflowStatusFromFile(workspacePath) {
-        let workflowStatus = null;
-        let isCompleted = false;
-
-        const workflowPath = join(workspacePath, 'logs', 'workflow.json');
-        const workflowContent = await readFile(workflowPath, 'utf-8');
-        const workflowLogs = JSON.parse(workflowContent);
-
-        let currentStage = 'idle';
-        for (let i = workflowLogs.length - 1; i >= 0; i--) {
-            const log = workflowLogs[i];
-            if (log.type === 'stage_change') { currentStage = log.to; break; }
-            if (log.type === 'plan_generated') { currentStage = 'planning'; break; }
-            if (log.type === 'step_started') { currentStage = 'executing'; break; }
-        }
-
-        const stepStarts = workflowLogs.filter(l => l.type === 'step_started');
-        const stepCompletes = workflowLogs.filter(l => l.type === 'step_completed');
-        const lastUserInput = workflowLogs.filter(l => l.type === 'user_input' || l.type === 'user_answer');
-        const lastAgentQuestion = workflowLogs.filter(l => l.type === 'agent_question');
-
-        const awaitingUserInput = lastAgentQuestion.length > lastUserInput.length;
-        const isRunning = stepStarts.length > stepCompletes.length || awaitingUserInput;
-
-        workflowStatus = { stage: currentStage, isRunning, awaitingUserInput };
-
-        const lastLog = workflowLogs[workflowLogs.length - 1];
-        isCompleted = lastLog && lastLog.type === 'workflow_completed';
-
-        return { status: workflowStatus, isCompleted };
-    }
-
-    /**
-     * 获取工作区信息
+     * 获取工作区信息（DB-only：scope/工作流状态/日志均来自 SQLite）
      */
     async getWorkspaceInfo(workspacePath, workspaceId) {
         let stats;
@@ -874,79 +707,62 @@ export default class MessageHandler {
             return null;
         }
 
+        const db = Database.getInstance().getDb();
+
+        // ---- Scope (from scope_entries) ----
         let scope = null;
         try {
-            scope = await this.readScope(workspacePath);
-        } catch (error) {
-            // scope.json 可能不存在或读取失败，不影响工作区显示
-        }
+            const scopeRows = db.prepare(
+                'SELECT scope_key, scope_value FROM scope_entries WHERE workspace_id = ?'
+            ).all(workspaceId);
+            if (scopeRows.length > 0) {
+                scope = {};
+                for (const sr of scopeRows) {
+                    try { scope[sr.scope_key] = JSON.parse(sr.scope_value); }
+                    catch { scope[sr.scope_key] = sr.scope_value; }
+                }
+            }
+        } catch { /* ignore */ }
 
-        // 读取 workflow.json 获取当前状态
+        // ---- Workflow status (from workflow_logs) ----
         let workflowStatus = null;
         let isCompleted = false;
+        let hasLogs = false;
         try {
-            const workflowPath = join(workspacePath, 'logs', 'workflow.json');
-            const workflowContent = await readFile(workflowPath, 'utf-8');
-            const workflowLogs = JSON.parse(workflowContent);
+            const rows = db.prepare(`
+                SELECT entry_type, entry_data, timestamp FROM workflow_logs
+                WHERE workspace_id = ? ORDER BY timestamp ASC
+            `).all(workspaceId);
 
-            // 从 workflow.json 推断当前状态
-            // 查找最后一个 stage_change 或 step_started 等事件
-            let currentStage = 'idle';
-            let isRunning = false;
-            let awaitingUserInput = false;
+            hasLogs = rows.length > 0;
 
-            for (let i = workflowLogs.length - 1; i >= 0; i--) {
-                const log = workflowLogs[i];
-                if (log.type === 'stage_change') {
-                    currentStage = log.to;
-                    break;
+            if (hasLogs) {
+                let currentStage = 'idle';
+                for (let i = rows.length - 1; i >= 0; i--) {
+                    const log = rows[i];
+                    if (log.entry_type === 'stage_change') {
+                        try { currentStage = JSON.parse(log.entry_data || '{}').to || currentStage; } catch {}
+                        break;
+                    }
+                    if (log.entry_type === 'plan_generated') { currentStage = 'planning'; break; }
+                    if (log.entry_type === 'step_started')   { currentStage = 'executing'; break; }
                 }
-                if (log.type === 'plan_generated') {
-                    currentStage = 'planning';
-                    break;
-                }
-                if (log.type === 'step_started') {
-                    currentStage = 'executing';
-                    break;
-                }
+
+                const count = type => rows.filter(r => r.entry_type === type).length;
+                const awaitingUserInput =
+                    count('agent_question') > (count('user_input') + count('user_answer'));
+                const isRunning =
+                    count('step_started') > count('step_completed') || awaitingUserInput;
+
+                workflowStatus = { stage: currentStage, isRunning, awaitingUserInput };
+
+                const lastLog = rows[rows.length - 1];
+                isCompleted = lastLog && lastLog.entry_type === 'workflow_completed';
             }
-
-            // 检查是否有未完成的 user_answer（等待用户输入）
-            const lastUserInput = workflowLogs.filter(l => l.type === 'user_input' || l.type === 'user_answer');
-            const lastAgentQuestion = workflowLogs.filter(l => l.type === 'agent_question');
-
-            if (lastAgentQuestion.length > lastUserInput.length) {
-                awaitingUserInput = true;
-            }
-
-            // 检查最后一个 step_started 是否有对应的 step_completed
-            const stepStarts = workflowLogs.filter(l => l.type === 'step_started');
-            const stepCompletes = workflowLogs.filter(l => l.type === 'step_completed');
-
-            // 如果有 step_started 但没有对应数量的 step_completed，说明还在运行
-            isRunning = stepStarts.length > stepCompletes.length;
-
-            // 如果有 agent_question 未回答，也在运行
-            if (awaitingUserInput) {
-                isRunning = true;
-            }
-
-            workflowStatus = {
-                stage: currentStage,
-                isRunning,
-                awaitingUserInput
-            };
-
-            // 检查最后一条日志是否为 workflow_completed
-            const lastLog = workflowLogs[workflowLogs.length - 1];
-            isCompleted = lastLog && lastLog.type === 'workflow_completed';
-        } catch (error) {
-            // workflow.json 可能不存在，不影响工作区显示
-        }
+        } catch { /* ignore */ }
 
         const hasCharts = await this.hasFiles(workspacePath, 'charts');
         const hasReports = await this.hasFiles(workspacePath, 'reports');
-        const hasLogs = await this.hasFiles(workspacePath, 'logs');
 
         return {
             workspaceId,
@@ -964,23 +780,7 @@ export default class MessageHandler {
     }
 
     /**
-     * 读取scope.json
-     */
-    async readScope(workspacePath) {
-        const scopePath = join(workspacePath, 'scope.json');
-        try {
-            const content = await readFile(scopePath, 'utf-8');
-            return JSON.parse(content);
-        } catch (error) {
-            if (error.code === 'ENOENT') {
-                return null;
-            }
-            throw error;
-        }
-    }
-
-    /**
-     * 读取目录下的所有文件
+     * 读取目录下的所有文件（仅 charts/reports；logs 已迁移到 SQLite）
      */
     async readFiles(workspacePath, subDir) {
         const dirPath = join(workspacePath, subDir);
@@ -995,17 +795,9 @@ export default class MessageHandler {
                     const stats = await stat(filePath);
 
                     let content = null;
-                    let isBinary = false;
+                    const isBinary = false;
 
-                    // 根据文件类型决定是否读取内容
-                    if (entry.name.endsWith('.svg')) {
-                        content = await readFile(filePath, 'utf-8');
-                        isBinary = false;
-                    } else if (entry.name.endsWith('.md')) {
-                        content = await readFile(filePath, 'utf-8');
-                    } else if (entry.name.endsWith('.json')) {
-                        content = await readFile(filePath, 'utf-8');
-                    } else if (entry.name.endsWith('.log')) {
+                    if (entry.name.endsWith('.svg') || entry.name.endsWith('.md')) {
                         content = await readFile(filePath, 'utf-8');
                     }
 
@@ -1040,6 +832,39 @@ export default class MessageHandler {
             return entries.length > 0;
         } catch (error) {
             return false;
+        }
+    }
+
+    /**
+     * 从 SQLite session_logs 表读取会话日志，模拟原 logs 目录的文件结构
+     * 整段日志聚合为单个 "session.log" 虚拟条目，保持前端 API 形态兼容。
+     */
+    _readSessionLogs(workspaceId) {
+        try {
+            const db = Database.getInstance().getDb();
+            const rows = db.prepare(`
+                SELECT message, timestamp FROM session_logs
+                WHERE workspace_id = ? ORDER BY timestamp ASC
+            `).all(workspaceId);
+
+            if (rows.length === 0) return [];
+
+            const content = rows.map(r => r.message).join('\n');
+            const firstTs = new Date(rows[0].timestamp).getTime();
+            const lastTs = new Date(rows[rows.length - 1].timestamp).getTime();
+
+            return [{
+                name: 'session.log',
+                path: `sqlite:session_logs?workspace=${workspaceId}`,
+                size: Buffer.byteLength(content, 'utf-8'),
+                createdAt: firstTs,
+                modifiedAt: lastTs,
+                content,
+                isBinary: false,
+            }];
+        } catch (err) {
+            console.warn('[MessageHandler] _readSessionLogs failed:', err.message);
+            return [];
         }
     }
 }

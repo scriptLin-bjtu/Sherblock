@@ -47,7 +47,6 @@ export class WorkspaceManager {
         // If already initialized with a workspaceId, just ensure directories exist
         if (this.initialized && this.workspaceId) {
             await mkdir(this.workspacePath, { recursive: true });
-            await mkdir(join(this.workspacePath, 'logs'), { recursive: true });
             await mkdir(join(this.workspacePath, 'charts'), { recursive: true });
             await mkdir(join(this.workspacePath, 'reports'), { recursive: true });
             return;
@@ -64,9 +63,8 @@ export class WorkspaceManager {
             // Set workspace path
             this.workspacePath = join(process.cwd(), 'data', this.workspaceId);
 
-            // Create workspace directory structure
+            // Create workspace directory structure (only artifact dirs; logs/scope live in SQLite)
             await mkdir(this.workspacePath, { recursive: true });
-            await mkdir(join(this.workspacePath, 'logs'), { recursive: true });
             await mkdir(join(this.workspacePath, 'charts'), { recursive: true });
             await mkdir(join(this.workspacePath, 'reports'), { recursive: true });
 
@@ -106,7 +104,8 @@ export class WorkspaceManager {
     }
 
     /**
-     * Get scope.json file path
+     * Get scope path (returns workspace root; scope itself lives in SQLite)
+     * Kept for legacy callers that may still need a directory hint.
      */
     getScopePath() {
         if (!this.workspacePath) {
@@ -136,16 +135,6 @@ export class WorkspaceManager {
     }
 
     /**
-     * Get logs directory path
-     */
-    getLogsPath() {
-        if (!this.workspacePath) {
-            throw new Error('Workspace not initialized');
-        }
-        return join(this.workspacePath, 'logs');
-    }
-
-    /**
      * Check if workspace is initialized
      */
     isInitialized() {
@@ -159,9 +148,8 @@ export class WorkspaceManager {
         this.workspaceId = workspaceId;
         this.workspacePath = join(process.cwd(), 'data', this.workspaceId);
 
-        // 确保目录存在
+        // 确保目录存在（仅 artifact 目录；logs/scope 存于 SQLite）
         await mkdir(this.workspacePath, { recursive: true });
-        await mkdir(join(this.workspacePath, 'logs'), { recursive: true });
         await mkdir(join(this.workspacePath, 'charts'), { recursive: true });
         await mkdir(join(this.workspacePath, 'reports'), { recursive: true });
 

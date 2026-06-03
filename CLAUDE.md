@@ -146,13 +146,15 @@ Each skill exports `default` object with:
 
 ### Workspace Management (`src/utils/workspace-manager.js`)
 
-Each task execution creates a unique workspace directory to isolate task files:
+Each task execution creates a unique workspace directory to isolate task artifacts:
 - Workspace ID format: `workspace-YYYYMMDD-HHmmss-{random}`
-- Workspace structure:
-  - `data/sherblock.db` - SQLite database (primary data store)
+- Workspace structure (artifact-only; scope/logs live in SQLite):
+  - `data/sherblock.db` - SQLite database (single source of truth for scope and logs)
   - `data/{workspaceId}/` - Root workspace directory
   - `data/{workspaceId}/charts/` - Generated charts (SVG files)
   - `data/{workspaceId}/reports/` - Generated reports (Markdown files)
+
+> 注：旧版会写入的 `scope.json`、`logs/workflow.json`、`logs/session.log`、`logs/session-*.log` 已全部下线，统一由 SQLite 中的 `scope_entries`、`workflow_logs`、`session_logs` 表承担。workspace 目录中除 `charts/`、`reports/` 外不再写文件。
 
 ### Data Storage (`src/db/`)
 
@@ -374,8 +376,8 @@ frontend/                       # 原生 JavaScript 前端
    - PlanAgent generates a plan with `scope` (shared state) and `steps`
    - ExecuteAgent updates `scope` during execution via `UPDATE_SCOPE` actions
    - WorkflowStateMachine enforces state transitions with guards
-   - **ScopeManager** (`src/utils/scope-manager.js`): Persists scope to workspace `scope.json` for debugging and recovery
-   - **WorkspaceManager** (`src/utils/workspace-manager.js`): Creates isolated workspace directories for each task
+   - **ScopeManager** (`src/utils/scope-manager.js`): Persists scope to SQLite `scope_entries` table (DB-only, no file)
+   - **WorkspaceManager** (`src/utils/workspace-manager.js`): Creates isolated workspace directories (artifact-only: `charts/`, `reports/`)
 
 4. **Skill System**: Skills are modular and loaded dynamically. Each skill is a self-contained module that:
    - Defines its interface (name, params, when to use)
