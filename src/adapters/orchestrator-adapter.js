@@ -17,6 +17,7 @@ export class OrchestratorAdapter {
         this.pendingQuestion = null;
         this.skillRegistry = null;
         this.workflowLogger = workflowLogger;
+        this._lastQuestionText = null;
 
         // 保存初始化 Promise，以便在 run() 中等待
         this._initPromise = this.setupOrchestrator();
@@ -255,6 +256,7 @@ export class OrchestratorAdapter {
             });
 
             // 等待用户输入
+            this._lastQuestionText = data.question;
             await this.waitForUserInput();
         });
 
@@ -289,12 +291,40 @@ export class OrchestratorAdapter {
         if (this.pendingQuestion) {
             this.pendingQuestion(input);
             this.pendingQuestion = null;
+            this._lastQuestionText = null;
         }
 
         // 同时触发 orchestrator 层面的 Promise resolve
         if (this.orchestrator && this.orchestrator.handleUserInput) {
             this.orchestrator.handleUserInput(input);
         }
+    }
+
+    /**
+     * 重连到新客户端（WebSocket 重连后调用）
+     * @param {string} newClientId - 新的客户端 ID
+     */
+    reconnect(newClientId) {
+        this.clientId = newClientId;
+        console.log(`[OrchestratorAdapter] Reconnected to new client: ${newClientId}`);
+    }
+
+    /**
+     * 获取状态恢复数据（供前端重连后恢复 UI）
+     * @returns {Object} 状态恢复数据
+     */
+    getStateRecovery() {
+        const orchestratorState = this.orchestrator ? this.orchestrator.getState() : null;
+        const isAwaitingInput = this.pendingQuestion !== null;
+
+        return {
+            stage: orchestratorState?.stage || 'idle',
+            isAwaitingInput,
+            lastQuestion: this._lastQuestionText,
+            infos: this.orchestrator?.questionAgent?.getinfos() || null,
+            conversationHistory: this.orchestrator?.questionAgent?.conversationHistory || [],
+            isAnalyzing: true,
+        };
     }
 
     /**

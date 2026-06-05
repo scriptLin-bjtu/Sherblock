@@ -72,7 +72,11 @@
       "Bash(npx @mermaid-js/mermaid-cli -i thesis/figures/directory-structure.mmd -o thesis/figures/directory-structure.pdf)",
       "Bash(npx @mermaid-js/mermaid-cli -i thesis/figures/parallel-execution.mmd -o thesis/figures/parallel-execution.pdf)",
       "Bash(npx @mermaid-js/mermaid-cli -i thesis/figures/context-compression.mmd -o thesis/figures/context-compression.pdf)",
-      "mcp__exa__web_search_exa"
+      "mcp__exa__web_search_exa",
+      "Bash(findstr /v __pycache__)",
+      "PowerShell(Get-ChildItem -Path \"D:\\\\project\\\\nodejs-project\\\\sherblock\\\\frontend\\\\src\" -Recurse | Where-Object { !$_.PSIsContainer } | Select-Object -ExpandProperty FullName)",
+      "Bash(xxd \"D:\\\\project\\\\nodejs-project\\\\sherblock\\\\README-zh.md\")",
+      "PowerShell($lines = Get-Content -Path \"D:\\\\project\\\\nodejs-project\\\\sherblock\\\\README-zh.md\" -Encoding UTF8; $lines[127..138] | ForEach-Object { $_ })"
     ]
   }
 }

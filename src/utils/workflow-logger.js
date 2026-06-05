@@ -1,94 +1,37 @@
 /**
- * Workflow Logger - 结构化JSON工作流日志
- * 使用 SQLite (LogRepository) 作为主存储，文件作为 fallback
+ * Workflow Logger - 结构化工作流日志（纯 SQLite，无文件输出）
  */
 
-import { open, readFile, stat, writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
-import { workspaceManager } from './workspace-manager.js';
 import { LogRepository } from '../db/log-repository.js';
 
 class WorkflowLogger {
     constructor() {
-        this.fileHandle = null;
         this.workspaceId = null;
-        this.logFilePath = null;
-        this.sessionLogPath = null;
-        this.buffer = [];
         this.originalConsole = {
             log: console.log,
             error: console.error,
             warn: console.warn,
             info: console.info
         };
-        this.writeLock = null;
         this.logRepo = null;
-        this._useDb = false;
     }
 
     /**
-     * 获取写入锁
-     * @private
-     */
-    async _acquireLock() {
-        while (this.writeLock) {
-            await new Promise(resolve => setTimeout(resolve, 10));
-        }
-        this.writeLock = true;
-    }
-
-    /**
-     * 释放写入锁
-     * @private
-     */
-    _releaseLock() {
-        this.writeLock = null;
-    }
-
-    /**
-     * 初始化工作流日志
+     * 初始化工作流日志（DB-only）
      * @param {string} workspaceId - 工作区ID
      */
     async initialize(workspaceId) {
         this.workspaceId = workspaceId;
+        this.logRepo = new LogRepository(workspaceId);
 
-        // Try to initialize LogRepository
-        try {
-            this.logRepo = new LogRepository(workspaceId);
-            this._useDb = true;
-        } catch (error) {
-            console.warn('[WorkflowLogger] Failed to init LogRepository, using file fallback:', error.message);
-            this._useDb = false;
-        }
-
-        // 获取日志目录路径
-        const logsPath = workspaceManager.getLogsPath();
-
-        // 工作流日志文件名固定为 workflow.json
-        this.logFilePath = join(logsPath, 'workflow.json');
-        this.sessionLogPath = join(logsPath, 'session.log');
-
-        // Load existing buffer from file (for backward compat and fallback)
-        try {
-            const stats = await stat(this.logFilePath);
-            if (stats.size > 0) {
-                const content = await readFile(this.logFilePath, 'utf-8');
-                this.buffer = JSON.parse(content);
-            } else {
-                this.buffer = [];
-            }
-        } catch {
-            this.buffer = [];
-        }
-
-        // 初始化 session.log
+        // 在 DB session_logs 表中标记会话开始
         const startTime = new Date().toISOString();
-        await this._writeSessionLog(`[${startTime}] ===== Session Started: ${workspaceId} =====\n`);
+        this._writeSessionLog(`[${startTime}] ===== Session Started: ${workspaceId} =====`);
 
-        // 启动控制台输出拦截
+        // 启动控制台输出拦截 → DB session_logs
         this._interceptConsole();
 
-        this.originalConsole.log(`[WorkflowLogger] Initialized: ${this._useDb ? 'DB' : 'file'} mode`);
+        this.originalConsole.log('[WorkflowLogger] Initialized: DB-only mode');
     }
 
     /**
@@ -100,22 +43,22 @@ class WorkflowLogger {
 
         console.log = function(...args) {
             self.originalConsole.log.apply(console, args);
-            self._writeSessionLog(`[${new Date().toISOString()}] [LOG] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`);
+            self._writeSessionLog(`[${new Date().toISOString()}] [LOG] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`);
         };
 
         console.error = function(...args) {
             self.originalConsole.error.apply(console, args);
-            self._writeSessionLog(`[${new Date().toISOString()}] [ERROR] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`);
+            self._writeSessionLog(`[${new Date().toISOString()}] [ERROR] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`);
         };
 
         console.warn = function(...args) {
             self.originalConsole.warn.apply(console, args);
-            self._writeSessionLog(`[${new Date().toISOString()}] [WARN] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`);
+            self._writeSessionLog(`[${new Date().toISOString()}] [WARN] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`);
         };
 
         console.info = function(...args) {
             self.originalConsole.info.apply(console, args);
-            self._writeSessionLog(`[${new Date().toISOString()}] [INFO] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`);
+            self._writeSessionLog(`[${new Date().toISOString()}] [INFO] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`);
         };
     }
 
@@ -131,27 +74,15 @@ class WorkflowLogger {
     }
 
     /**
-     * 写入 session.log
+     * 写入 session.log（DB-only）
      * @private
      */
-    async _writeSessionLog(message) {
-        if (!this.sessionLogPath) return;
-
-        // Also write to DB if available
-        if (this._useDb && this.logRepo) {
-            try {
-                this.logRepo.logToSession(message.trim());
-            } catch {
-                // Ignore DB errors
-            }
-        }
-
+    _writeSessionLog(message) {
+        if (!this.logRepo) return;
         try {
-            const handle = await open(this.sessionLogPath, 'a');
-            await handle.writeFile(message, 'utf-8');
-            await handle.close();
+            this.logRepo.logToSession(message);
         } catch (err) {
-            this.originalConsole.error('[WorkflowLogger] Failed to write session.log:', err);
+            this.originalConsole.error('[WorkflowLogger] Failed to write session log:', err.message);
         }
     }
 
@@ -159,7 +90,7 @@ class WorkflowLogger {
      * 手动写入 session.log
      */
     async logToSession(message) {
-        await this._writeSessionLog(`[${new Date().toISOString()}] ${message}\n`);
+        this._writeSessionLog(`[${new Date().toISOString()}] ${message}`);
     }
 
     /**
@@ -465,29 +396,22 @@ class WorkflowLogger {
     }
 
     /**
-     * 添加日志条目（双写：DB + 文件）
+     * 添加日志条目（DB-only）
      * @private
      */
     async _appendEntry(entry) {
-        this.buffer.push(entry);
-
-        // Write to DB (synchronous, no lock needed)
-        if (this._useDb && this.logRepo) {
-            try {
-                this.logRepo._insertEntry(
-                    entry.type,
-                    entry.role || null,
-                    entry.agent || null,
-                    entry.content || null,
-                    this._extractEntryData(entry)
-                );
-            } catch (error) {
-                this.originalConsole.warn('[WorkflowLogger] DB write failed:', error.message);
-            }
+        if (!this.logRepo) return;
+        try {
+            this.logRepo._insertEntry(
+                entry.type,
+                entry.role || null,
+                entry.agent || null,
+                entry.content || null,
+                this._extractEntryData(entry)
+            );
+        } catch (error) {
+            this.originalConsole.warn('[WorkflowLogger] DB write failed:', error.message);
         }
-
-        // Also flush to file (backward compat during migration)
-        await this._flush();
     }
 
     /**
@@ -500,47 +424,17 @@ class WorkflowLogger {
     }
 
     /**
-     * 刷新缓冲到文件
-     * @private
-     */
-    async _flush() {
-        await this._acquireLock();
-        try {
-            const content = JSON.stringify(this.buffer, null, 2);
-            await writeFile(this.logFilePath, content, 'utf-8');
-        } catch (err) {
-            console.error('[WorkflowLogger] Failed to write:', err);
-        } finally {
-            this._releaseLock();
-        }
-    }
-
-    /**
      * 获取当前所有日志
      */
     getLogs() {
-        if (this._useDb && this.logRepo) {
+        if (this.logRepo) {
             try {
                 return this.logRepo.getLogs();
-            } catch {
-                // Fallback to buffer
+            } catch (err) {
+                this.originalConsole.warn('[WorkflowLogger] getLogs failed:', err.message);
             }
         }
-        return [...this.buffer];
-    }
-
-    /**
-     * 获取日志文件路径
-     */
-    getLogFilePath() {
-        return this.logFilePath;
-    }
-
-    /**
-     * 获取 session.log 文件路径
-     */
-    getSessionLogPath() {
-        return this.sessionLogPath;
+        return [];
     }
 
     /**
@@ -555,11 +449,8 @@ class WorkflowLogger {
      */
     async close() {
         const endTime = new Date().toISOString();
-        await this._writeSessionLog(`[${endTime}] ===== Session Ended =====\n`);
-
+        this._writeSessionLog(`[${endTime}] ===== Session Ended =====`);
         this._restoreConsole();
-
-        await this._flush();
         this.originalConsole.log('[WorkflowLogger] Closed');
     }
 }

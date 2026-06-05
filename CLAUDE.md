@@ -146,13 +146,15 @@ Each skill exports `default` object with:
 
 ### Workspace Management (`src/utils/workspace-manager.js`)
 
-Each task execution creates a unique workspace directory to isolate task files:
+Each task execution creates a unique workspace directory to isolate task artifacts:
 - Workspace ID format: `workspace-YYYYMMDD-HHmmss-{random}`
-- Workspace structure:
-  - `data/sherblock.db` - SQLite database (primary data store)
+- Workspace structure (artifact-only; scope/logs live in SQLite):
+  - `data/sherblock.db` - SQLite database (single source of truth for scope and logs)
   - `data/{workspaceId}/` - Root workspace directory
   - `data/{workspaceId}/charts/` - Generated charts (SVG files)
   - `data/{workspaceId}/reports/` - Generated reports (Markdown files)
+
+> 注：旧版会写入的 `scope.json`、`logs/workflow.json`、`logs/session.log`、`logs/session-*.log` 已全部下线，统一由 SQLite 中的 `scope_entries`、`workflow_logs`、`session_logs` 表承担。workspace 目录中除 `charts/`、`reports/` 外不再写文件。
 
 ### Data Storage (`src/db/`)
 
@@ -269,20 +271,23 @@ npm run dev
 
 ## Configuration
 
-Environment variables (in `.env`):
-- `BIGMODEL_API_KEY` - GLM API key
-- `DEEPSEEK_API_KEY` - DeepSeek API key
-- `ETHERSCAN_API_KEY` - Etherscan API key
+Environment variables (in `.env`), see `.env.example` for template:
+
+**Required:**
+- `DEEPSEEK_API_KEY` - DeepSeek API key (used by QuestionAgent, PlanAgent, ExecuteAgent)
+- `ETHERSCAN_API_KEY` - Etherscan API key (used by blockchain data query skills)
+
+**Network (optional):**
 - `HTTP_PROXY` - Proxy URL (defaults to `http://127.0.0.1:7890`)
 
-**Server configuration** (optional):
-- `HTTP_PORT` - HTTP server port (default: 3000)
-- `WS_PORT` - WebSocket server port (default: 8080)
-
-**Parallel execution configuration** (optional):
+**Parallel execution configuration (optional):**
 - `MAX_PARALLEL_TASKS` - Maximum parallel tasks (default: 3)
 - `USE_PARALLEL_EXECUTION` - Enable parallel mode (`true`/`false`)
 - `CONTINUE_ON_FAILURE` - Continue on failure (`true`/`false`)
+- `ENABLE_REVIEW_IN_PARALLEL` - Enable review phase in parallel mode (`true`/`false`)
+
+**Debug (optional):**
+- `COMPRESSION_DEBUG` - Enable compression debug logging (`true`/`false`)
 
 **Note**: The `.env` file and `data/` directory are excluded from git (see `.gitignore`). Create `.env` locally with your API keys.
 
@@ -371,8 +376,8 @@ frontend/                       # 原生 JavaScript 前端
    - PlanAgent generates a plan with `scope` (shared state) and `steps`
    - ExecuteAgent updates `scope` during execution via `UPDATE_SCOPE` actions
    - WorkflowStateMachine enforces state transitions with guards
-   - **ScopeManager** (`src/utils/scope-manager.js`): Persists scope to workspace `scope.json` for debugging and recovery
-   - **WorkspaceManager** (`src/utils/workspace-manager.js`): Creates isolated workspace directories for each task
+   - **ScopeManager** (`src/utils/scope-manager.js`): Persists scope to SQLite `scope_entries` table (DB-only, no file)
+   - **WorkspaceManager** (`src/utils/workspace-manager.js`): Creates isolated workspace directories (artifact-only: `charts/`, `reports/`)
 
 4. **Skill System**: Skills are modular and loaded dynamically. Each skill is a self-contained module that:
    - Defines its interface (name, params, when to use)

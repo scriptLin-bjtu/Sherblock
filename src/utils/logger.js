@@ -1,18 +1,15 @@
 /**
- * Logger Utility - Intercepts console output and writes to file
- * Creates a new log file for each session
+ * Logger Utility - Intercepts console output and forwards it to SQLite
+ * (LogRepository.session_logs). No file is created — the previous
+ * session-*.log files are gone.
  */
 
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import os from 'node:os';
 import { workspaceManager } from './workspace-manager.js';
+import { LogRepository } from '../db/log-repository.js';
 
 class Logger {
-    constructor(options = {}) {
-        this.logsDir = options.logsDir || path.join(process.cwd(), 'data', 'logs');
-        this.logFile = null;
-        this.writeStream = null;
+    constructor() {
+        this.logRepo = null;
         this.originalConsole = {
             log: console.log,
             error: console.error,
@@ -24,98 +21,55 @@ class Logger {
     }
 
     /**
-     * Initialize logger - create log directory and file
+     * Initialize logger - bind to current workspace's LogRepository and
+     * start forwarding console output. Returns a human-readable sink id.
      */
     async initialize() {
         try {
-            // Use workspace logs directory if workspace is initialized
-            if (workspaceManager.isInitialized()) {
-                this.logsDir = workspaceManager.getLogsPath();
+            if (!workspaceManager.isInitialized()) {
+                return null;
             }
-            // Ensure logs directory exists
-            await fs.mkdir(this.logsDir, { recursive: true });
+            const workspaceId = workspaceManager.getWorkspaceId();
+            this.logRepo = new LogRepository(workspaceId);
 
-            // Generate log file name with timestamp
-            const timestamp = this._formatTimestamp(new Date());
-            this.logFile = path.join(this.logsDir, `session-${timestamp}.log`);
-
-            // Create write stream
-            this.writeStream = (await import('node:fs')).createWriteStream(
-                this.logFile,
-                { flags: 'a', encoding: 'utf8' }
-            );
-
-            // Intercept console methods
             this._interceptConsole();
-
             this.enabled = true;
 
-            // Write session header
-            this._writeToLog(
-                `\n${'='.repeat(60)}\n` +
-                `Session Started: ${new Date().toISOString()}\n` +
-                `Platform: ${os.platform()} ${os.release()}\n` +
-                `Node Version: ${process.version}\n` +
-                `${'='.repeat(60)}\n`
-            );
+            this._writeToDb('LOG',
+                `===== Session Started: ${new Date().toISOString()} =====`);
 
-            return this.logFile;
+            return `sqlite:session_logs?workspace=${workspaceId}`;
         } catch (error) {
-            console.error('Failed to initialize logger:', error.message);
+            this.originalConsole.error('Failed to initialize logger:', error.message);
             return null;
         }
     }
 
-    /**
-     * Intercept console methods to also write to log file
-     */
     _interceptConsole() {
         const self = this;
 
-        // Intercept console.log
-        console.log = function(...args) {
+        console.log = function (...args) {
             self.originalConsole.log(...args);
-            if (self.enabled) {
-                self._writeToLog('[LOG]', ...args);
-            }
+            if (self.enabled) self._writeToDb('LOG', ...args);
         };
-
-        // Intercept console.error
-        console.error = function(...args) {
+        console.error = function (...args) {
             self.originalConsole.error(...args);
-            if (self.enabled) {
-                self._writeToLog('[ERROR]', ...args);
-            }
+            if (self.enabled) self._writeToDb('ERROR', ...args);
         };
-
-        // Intercept console.warn
-        console.warn = function(...args) {
+        console.warn = function (...args) {
             self.originalConsole.warn(...args);
-            if (self.enabled) {
-                self._writeToLog('[WARN]', ...args);
-            }
+            if (self.enabled) self._writeToDb('WARN', ...args);
         };
-
-        // Intercept console.info
-        console.info = function(...args) {
+        console.info = function (...args) {
             self.originalConsole.info(...args);
-            if (self.enabled) {
-                self._writeToLog('[INFO]', ...args);
-            }
+            if (self.enabled) self._writeToDb('INFO', ...args);
         };
-
-        // Intercept console.debug
-        console.debug = function(...args) {
+        console.debug = function (...args) {
             self.originalConsole.debug(...args);
-            if (self.enabled) {
-                self._writeToLog('[DEBUG]', ...args);
-            }
+            if (self.enabled) self._writeToDb('DEBUG', ...args);
         };
     }
 
-    /**
-     * Restore original console methods
-     */
     _restoreConsole() {
         console.log = this.originalConsole.log;
         console.error = this.originalConsole.error;
@@ -124,85 +78,46 @@ class Logger {
         console.debug = this.originalConsole.debug;
     }
 
-    /**
-     * Write formatted log entry to file
-     */
-    _writeToLog(level, ...args) {
-        if (!this.writeStream || this.writeStream.destroyed) return;
-
-        const timestamp = new Date().toISOString();
-        const message = args.map(arg => this._formatArgument(arg)).join(' ');
-        const logEntry = `[${timestamp}] ${level} ${message}\n`;
-
-        this.writeStream.write(logEntry);
+    _writeToDb(level, ...args) {
+        if (!this.logRepo) return;
+        try {
+            const message = args.map(arg => this._formatArgument(arg)).join(' ');
+            // logToSession is fixed to 'LOG' level; encode level inline
+            this.logRepo.logToSession(`[${new Date().toISOString()}] [${level}] ${message}`);
+        } catch {
+            // never throw from console interceptor
+        }
     }
 
-    /**
-     * Format argument for log output
-     */
     _formatArgument(arg) {
         if (arg === null) return 'null';
         if (arg === undefined) return 'undefined';
-
         switch (typeof arg) {
-            case 'string':
-                return arg;
+            case 'string': return arg;
             case 'number':
-            case 'boolean':
-                return String(arg);
+            case 'boolean': return String(arg);
             case 'object':
-                try {
-                    return JSON.stringify(arg, null, 2);
-                } catch {
-                    return '[Object]';
-                }
-            default:
-                return String(arg);
+                try { return JSON.stringify(arg); } catch { return '[Object]'; }
+            default: return String(arg);
         }
     }
 
     /**
-     * Format timestamp for filename (YYYYMMDD-HHmmss)
-     */
-    _formatTimestamp(date) {
-        const pad = (n) => String(n).padStart(2, '0');
-        return (
-            date.getFullYear() +
-            pad(date.getMonth() + 1) +
-            pad(date.getDate()) + '-' +
-            pad(date.getHours()) +
-            pad(date.getMinutes()) +
-            pad(date.getSeconds())
-        );
-    }
-
-    /**
-     * Get current log file path
+     * Compatibility shim - returns the SQLite sink id, not a filesystem path.
      */
     getLogFile() {
-        return this.logFile;
+        if (!this.logRepo) return null;
+        return `sqlite:session_logs?workspace=${workspaceManager.getWorkspaceId()}`;
     }
 
-    /**
-     * Close logger and restore console
-     */
     async close() {
-        if (this.writeStream && !this.writeStream.destroyed) {
-            this._writeToLog(
-                `\n${'='.repeat(60)}\n` +
-                `Session Ended: ${new Date().toISOString()}\n` +
-                `${'='.repeat(60)}\n`
-            );
-
-            await new Promise((resolve) => {
-                this.writeStream.end(resolve);
-            });
+        if (this.enabled) {
+            this._writeToDb('LOG',
+                `===== Session Ended: ${new Date().toISOString()} =====`);
         }
-
         this._restoreConsole();
         this.enabled = false;
     }
 }
 
-// Export singleton instance
 export const logger = new Logger();

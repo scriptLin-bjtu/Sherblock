@@ -126,17 +126,23 @@ Whether you're tracking fund flows, analyzing smart contract interactions, profi
    cp .env.example .env
    ```
    
-   Edit `.env` file with your API keys:
+   Edit `.env` file with your API keys (see `.env.example` for full template):
    ```env
    # Required API Keys
    DEEPSEEK_API_KEY=your_deepseek_api_key_here
    ETHERSCAN_API_KEY=your_etherscan_api_key_here
-   
-   # Optional Configuration
-   MAX_PARALLEL_TASKS=3
-   USE_PARALLEL_EXECUTION=true
-   CONTINUE_ON_FAILURE=false
+
+   # Network (optional)
    HTTP_PROXY=http://127.0.0.1:7890
+
+   # Parallel Execution (optional)
+   MAX_PARALLEL_TASKS=3
+   USE_PARALLEL_EXECUTION=false
+   CONTINUE_ON_FAILURE=false
+   ENABLE_REVIEW_IN_PARALLEL=false
+
+   # Debug (optional)
+   COMPRESSION_DEBUG=false
    ```
 
 ## 🚀 Usage
@@ -209,13 +215,12 @@ Whether you're tracking fund flows, analyzing smart contract interactions, profi
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MAX_PARALLEL_TASKS` | `3` | Maximum number of parallel execution tasks |
-| `USE_PARALLEL_EXECUTION` | `true` | Enable/disable parallel execution mode |
-| `CONTINUE_ON_FAILURE` | `false` | Continue execution even if some tasks fail |
-| `HTTP_PORT` | `3000` | HTTP server port |
-| `WS_PORT` | `8080` | WebSocket server port |
 | `HTTP_PROXY` | `http://127.0.0.1:7890` | Proxy server for API requests |
-| `API_TIMEOUT` | `30000` | API request timeout in milliseconds |
+| `MAX_PARALLEL_TASKS` | `3` | Maximum number of parallel execution tasks |
+| `USE_PARALLEL_EXECUTION` | `false` | Enable/disable parallel execution mode |
+| `CONTINUE_ON_FAILURE` | `false` | Continue execution even if some tasks fail |
+| `ENABLE_REVIEW_IN_PARALLEL` | `false` | Enable review phase in parallel execution mode |
+| `COMPRESSION_DEBUG` | `false` | Enable compression debug logging |
 
 ## 📚 Supported Chains & Skills
 

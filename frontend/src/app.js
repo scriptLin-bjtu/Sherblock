@@ -2550,6 +2550,168 @@ function renderMessages() {
 }
 
 /**
+ * Add floating DAG container to page if DAG data exists
+ */
+function addFloatingDAGContainer() {
+    // Remove existing floating container
+    const existing = document.getElementById("dag-floating");
+    if (existing) {
+        existing.remove();
+    }
+
+    // Only add if DAG data exists and should be visible
+    if (!state.dagFloatingVisible || !state.dagPositionedNodes || !state.dagLayoutEdges) {
+        return;
+    }
+
+    // Create floating container
+    const floatingHtml = renderDAGFloatingContainer(state.dagPositionedNodes, state.dagLayoutEdges);
+
+    // Add to page
+    const messageList = document.getElementById("message-list");
+    if (messageList) {
+        // Create a container for the floating DAG
+        const wrapper = document.createElement("div");
+        wrapper.id = "dag-floating-wrapper";
+        wrapper.innerHTML = floatingHtml;
+        wrapper.style.cssText = "position: fixed; right: 0; bottom: 0; z-index: 999; pointer-events: none;";
+        wrapper.querySelector(".dag-floating-container").style.pointerEvents = "auto";
+        document.body.appendChild(wrapper);
+    }
+}
+
+/**
+ * Initialize DAG interaction handlers
+ */
+function initDAGInteractions() {
+    // Do NOT remove existing overlay - it would close the user's DAG preview
+    // when renderMessages() is called during step completion.
+    // showDAGPreview() already handles removing stale overlays before creating new ones.
+
+    // Preview button - use current state to regenerate SVG with statuses
+    document.querySelectorAll(".dag-preview-btn").forEach((btn) => {
+        btn.onclick = () => {
+            // Always use current state to generate fresh SVG with statuses
+            let svgContent;
+            if (!state.dagPositionedNodes || !state.dagLayoutEdges) {
+                // Fallback to data attribute for backward compatibility
+                const container = btn.closest(".dag-container");
+                const svgData = container?.dataset.dagSvg;
+                if (!svgData) return;
+                svgContent = decodeURIComponent(svgData);
+            } else {
+                // Regenerate SVG with current node statuses
+                svgContent = generateSVG(state.dagPositionedNodes, state.dagLayoutEdges, {}, state.dagNodeStatuses);
+            }
+
+            // Create overlay
+            const overlay = document.createElement("div");
+            overlay.className = "dag-preview-overlay";
+            overlay.innerHTML = `
+        <div class="dag-preview-modal">
+          <button class="dag-preview-close">&times;</button>
+          ${svgContent}
+        </div>
+      `;
+            document.body.appendChild(overlay);
+
+            // Adjust SVG for preview
+            const svg = overlay.querySelector(".dag-svg");
+            if (svg) {
+                svg.classList.add("dag-preview-svg");
+                const viewBox = svg.viewBox.baseVal;
+                if (viewBox.width && viewBox.height) {
+                    const aspect = viewBox.width / viewBox.height;
+                    if (aspect > 1) {
+                        svg.style.width = "80vw";
+                        svg.style.height = "auto";
+                    } else {
+                        svg.style.height = "80vh";
+                        svg.style.width = "auto";
+                    }
+                }
+            }
+
+            // Re-attach node click handlers for preview
+            initDAGNodeClick(overlay);
+
+            // Close handler
+            overlay.querySelector(".dag-preview-close").onclick = () =>
+                overlay.remove();
+            overlay.onclick = (e) => {
+                if (e.target === overlay) overlay.remove();
+            };
+        };
+    });
+
+    // Node click handlers for inline SVG
+    initDAGNodeClick(document);
+}
+
+/**
+ * Initialize DAG node click handlers
+ * @param {Element|Document} parent - Parent element to search for nodes
+ */
+function initDAGNodeClick(parent) {
+    parent.querySelectorAll(".dag-node").forEach((node) => {
+        node.style.cursor = "pointer";
+        node.onclick = (e) => {
+            e.stopPropagation();
+            const nodeData = node.dataset.node;
+            if (!nodeData) return;
+
+            const data = JSON.parse(decodeURIComponent(nodeData));
+
+            // Create detail overlay
+            const overlay = document.createElement("div");
+            overlay.className = "dag-preview-overlay";
+            overlay.innerHTML = `
+        <div class="dag-node-modal">
+          <button class="dag-preview-close">&times;</button>
+          <div class="dag-node-detail">
+            <div class="dag-node-detail-header">
+              <span class="dag-node-detail-id">${escapeHtml(data.id)}</span>
+              <span class="dag-node-detail-skill">${escapeHtml(data.skill)}</span>
+            </div>
+            <div class="dag-node-detail-section">
+              <div class="dag-node-detail-label">Goal</div>
+              <div class="dag-node-detail-content">${escapeHtml(data.goal)}</div>
+            </div>
+            ${
+                data.depends_on.length > 0
+                    ? `
+              <div class="dag-node-detail-section">
+                <div class="dag-node-detail-label">Dependencies</div>
+                <div class="dag-node-detail-content">${data.depends_on.map((d) => escapeHtml(d)).join(", ")}</div>
+              </div>
+            `
+                    : ""
+            }
+            ${
+                data.success_criteria
+                    ? `
+              <div class="dag-node-detail-section">
+                <div class="dag-node-detail-label">Success Criteria</div>
+                <div class="dag-node-detail-content">${escapeHtml(data.success_criteria)}</div>
+              </div>
+            `
+                    : ""
+            }
+          </div>
+        </div>
+      `;
+            document.body.appendChild(overlay);
+
+            overlay.querySelector(".dag-preview-close").onclick = () =>
+                overlay.remove();
+            overlay.onclick = (e) => {
+                if (e.target === overlay) overlay.remove();
+            };
+        };
+    });
+}
+
+/**
  * Render SVG icon
  */
 function renderIcon(iconName, props = {}) {
@@ -2910,6 +3072,188 @@ function showLogPreview(logIndex) {
 window.showLogPreview = showLogPreview;
 
 /**
+ * Toggle DAG floating container collapse
+ */
+function toggleDAGCollapse() {
+    state.dagCollapsed = !state.dagCollapsed;
+    const container = document.getElementById("dag-floating");
+    if (container) {
+        const body = container.querySelector(".dag-floating-body");
+        const btn = container.querySelector(".dag-floating-collapse-btn");
+        if (state.dagCollapsed) {
+            body.classList.add("collapsed");
+            btn.textContent = "▶";
+            btn.title = "Expand";
+        } else {
+            body.classList.remove("collapsed");
+            btn.textContent = "▼";
+            btn.title = "Collapse";
+        }
+    }
+}
+
+// Make toggleDAGCollapse available globally
+window.toggleDAGCollapse = toggleDAGCollapse;
+
+/**
+ * Restore DAG from workflow logs (for page refresh or workspace switch)
+ * @param {Array} logs - Workflow logs
+ */
+function restoreDAGFromLogs(logs) {
+    // Find plan_generated log
+    const planLog = logs.find((log) => log.type === "plan_generated");
+    if (!planLog) {
+        return;
+    }
+
+    const steps = planLog.steps || [];
+    const nodes = planLog.nodes || {};
+
+    const hasDAG = Object.keys(nodes).length > 0;
+    const isSerial = steps.length > 0 && !hasDAG;
+
+    let positionedNodes, layoutEdges;
+
+    if (hasDAG) {
+        const layoutOptions = {
+            nodeWidth: 220,
+            nodeHeight: 90,
+            horizontalGap: 80,
+            verticalGap: 20,
+        };
+        positionedNodes = computeDAGLayout(nodes, layoutOptions);
+        layoutEdges = buildEdgesFromNodes(nodes, positionedNodes);
+    } else if (isSerial) {
+        const layoutOptions = {
+            nodeWidth: 220,
+            nodeHeight: 90,
+            verticalGap: 20,
+        };
+        const layout = computeSerialLayout(steps, layoutOptions);
+        positionedNodes = layout.nodes;
+        layoutEdges = layout.edges;
+    }
+
+    if (!positionedNodes || Object.keys(positionedNodes).length === 0) {
+        return;
+    }
+
+    // Store DAG data in state
+    state.dagData = { nodes, steps };
+    state.dagPositionedNodes = positionedNodes;
+    state.dagLayoutEdges = layoutEdges;
+    state.dagFloatingVisible = true;
+
+    // Helper function to convert step name to node ID format
+    // workflow.json uses "Step 0", "Step 1" but nodes use "step_1", "step_2"
+    const convertStepNameToNodeId = (stepName) => {
+        if (!stepName) return null;
+        // If already in node ID format (step_1, step_2), return as-is
+        if (stepName.startsWith("step_")) {
+            return stepName;
+        }
+        // Convert "Step 0" -> "step_1", "Step 1" -> "step_2", etc.
+        const match = stepName.match(/^Step\s+(\d+)$/i);
+        if (match) {
+            const num = parseInt(match[1], 10) + 1;
+            return `step_${num}`;
+        }
+        return stepName;
+    };
+
+    // Determine step statuses from logs
+    const nodeStatuses = {};
+    const completedSteps = logs.filter((log) => log.type === "step_completed");
+    const startedSteps = logs.filter((log) => log.type === "step_started");
+    const currentStepLog = logs.find((log) => log.type === "step_started");
+
+    // Mark completed steps (优先使用 step_id)
+    completedSteps.forEach((log) => {
+        const stepId = log.step_id || log.stepName || log.step_name;
+        const nodeId = convertStepNameToNodeId(stepId);
+        if (nodeId) {
+            nodeStatuses[nodeId] = "completed";
+        }
+    });
+
+    // Mark current running step (优先使用 step_id)
+    const currentStepId = currentStepLog?.step_id || currentStepLog?.stepName || currentStepLog?.step_name;
+    const currentNodeId = convertStepNameToNodeId(currentStepId);
+    const currentStepCompleted = completedSteps.some((c) => {
+        const cStepId = c.step_id || c.stepName || c.step_name;
+        return convertStepNameToNodeId(cStepId) === currentNodeId;
+    });
+    if (currentStepLog && currentNodeId && !currentStepCompleted) {
+        nodeStatuses[currentNodeId] = "running";
+    }
+
+    state.dagNodeStatuses = nodeStatuses;
+
+    // Floating DAG will be added by renderMessages -> addFloatingDAGContainer
+}
+
+/**
+ * Update DAG node status and re-render floating container
+ * @param {string} stepName - Step ID
+ * @param {string} status - Status: "pending" | "running" | "completed"
+ */
+function updateDAGNodeStatus(stepName, status) {
+    if (!state.dagFloatingVisible || !stepName) {
+        return;
+    }
+
+    // Convert step name to node ID format ("Step 0" -> "step_1")
+    const convertStepNameToNodeId = (name) => {
+        if (!name) return null;
+        if (name.startsWith("step_")) {
+            return name;
+        }
+        const match = name.match(/^Step\s+(\d+)$/i);
+        if (match) {
+            const num = parseInt(match[1], 10) + 1;
+            return `step_${num}`;
+        }
+        return name;
+    };
+
+    const nodeId = convertStepNameToNodeId(stepName);
+
+    // Update status
+    state.dagNodeStatuses[nodeId] = status;
+
+    // Re-render floating DAG
+    const container = document.getElementById("dag-floating");
+    if (container && state.dagPositionedNodes && state.dagLayoutEdges) {
+        const svg = generateSVG(state.dagPositionedNodes, state.dagLayoutEdges, {}, state.dagNodeStatuses);
+        const body = container.querySelector(".dag-scroll-area");
+        if (body) {
+            body.innerHTML = svg;
+        }
+
+        // Update header with new count
+        const stepCount = Object.keys(state.dagPositionedNodes).length;
+        const completedCount = Object.values(state.dagNodeStatuses).filter(s => s === "completed").length;
+        const header = container.querySelector(".dag-floating-header span");
+        if (header) {
+            header.textContent = `📋 Execution Plan (${completedCount}/${stepCount} completed)`;
+        }
+    }
+
+    // Also update DAG preview overlay if open (without closing it)
+    const previewOverlay = document.querySelector(".dag-preview-overlay");
+    if (previewOverlay && state.dagPositionedNodes && state.dagLayoutEdges) {
+        const svg = generateSVG(state.dagPositionedNodes, state.dagLayoutEdges, {}, state.dagNodeStatuses);
+        // Only replace the SVG content inside .dag-canvas, preserving pan/zoom state
+        const canvas = previewOverlay.querySelector(".dag-canvas");
+        if (canvas) {
+            canvas.innerHTML = svg;
+            // Re-attach node click handlers for updated nodes
+            initDAGNodeClick(previewOverlay);
+        }
+    }
+}
+
+/**
  * Render step list for backward compatibility
  * @param {Array} steps - Steps array
  * @param {Object} nodes - Nodes object
@@ -3153,6 +3497,7 @@ async function selectWorkspace(workspaceId) {
     stopAutoRefresh();
 
     state.selectedWorkspaceId = workspaceId;
+    sessionStorage.setItem('sherblock_lastWorkspaceId', workspaceId);
     state.messages = [];
     state.workflowLogs = []; // Clear workflow logs
     state.isWorkflowCompleted = false; // Reset completion status
@@ -3797,6 +4142,12 @@ function initWebSocketEvents() {
         updateConnectionStatus("connected");
         // Request workspace list
         websocketService.send({ type: "GET_WORKSPACES" });
+
+        // Auto-select previously active workspace (recovery from page refresh)
+        const lastWorkspaceId = sessionStorage.getItem('sherblock_lastWorkspaceId');
+        if (lastWorkspaceId) {
+            selectWorkspace(lastWorkspaceId);
+        }
     });
 
     websocketService.on("disconnected", () => {
@@ -3805,6 +4156,60 @@ function initWebSocketEvents() {
 
     websocketService.on("error", (data) => {
         console.error("WebSocket error:", data);
+    });
+
+    // Analysis reconnected - existing workflow was found on server
+    websocketService.on("ANALYSIS_RECONNECTED", (data) => {
+        const payload = data.payload || data;
+        const { workspaceId, stage } = payload;
+
+        if (workspaceId !== state.selectedWorkspaceId) return;
+
+        state.isAnalyzing = true;
+        state.awaitingUserInput = false;
+        state.isWorkflowCompleted = false;
+
+        updateInputState();
+        updateWorkflowControls("running");
+    });
+
+    // Workflow state recovery - full state from server after reconnection
+    websocketService.on("WORKFLOW_STATE_RECOVERY", (data) => {
+        const payload = data.payload || data;
+        const { workspaceId, stage, isAwaitingInput, lastQuestion } = payload;
+
+        if (workspaceId !== state.selectedWorkspaceId) return;
+
+        state.stage = stage || 'idle';
+        state.isAnalyzing = true;
+        state.awaitingUserInput = isAwaitingInput || false;
+        state.isWorkflowCompleted = false;
+
+        updateStageIndicator(state.stage);
+
+        if (state.awaitingUserInput) {
+            updateWorkflowControls("none");
+        } else if (['executing', 'planning', 'collecting'].includes(state.stage)) {
+            updateWorkflowControls("running");
+        }
+
+        updateInputState();
+
+        // Re-display pending question if awaiting input
+        if (isAwaitingInput && lastQuestion) {
+            const alreadyHasQuestion = state.messages.some(
+                m => m.type === 'agent' && m.content === lastQuestion
+            );
+            if (!alreadyHasQuestion) {
+                addMessage({
+                    type: "agent",
+                    agentType: "QuestionAgent",
+                    content: lastQuestion,
+                    requiresInput: true,
+                    timestamp: new Date().toISOString(),
+                });
+            }
+        }
     });
 
     // Workspace created - record new workspace and request list refresh

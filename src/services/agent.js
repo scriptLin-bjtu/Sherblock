@@ -40,7 +40,7 @@ export async function callLLM({
         // DeepSeek Reasoner（深度思考模式）- 使用 V4 Flash thinking 模式
         "deepseek-reasoner": {
             url: "https://api.deepseek.com/chat/completions",
-            defaultModel: "deepseek-v4-flash",
+            defaultModel: "deepseek-v4-pro",
             headers: (key) => ({
                 Authorization: `Bearer ${key}`,
                 "Content-Type": "application/json",
@@ -146,7 +146,7 @@ export async function callLLM({
                 throw new Error(
                     `${modelProvider.toUpperCase()} API Error: ${
                         res.status
-                    } ${errText}`
+                    } ${errText}`,
                 );
             }
 
@@ -159,7 +159,7 @@ export async function callLLM({
                 !resJson.choices[0].message
             ) {
                 throw new Error(
-                    `Invalid response structure from ${modelProvider}`
+                    `Invalid response structure from ${modelProvider}`,
                 );
             }
 
@@ -208,7 +208,7 @@ export async function callLLM({
             lastError = error;
             console.log(
                 `${modelProvider.toUpperCase()} API 请求失败 (尝试 ${attempt}/${maxRetries}):`,
-                error.message
+                error.message,
             );
             if (attempt < maxRetries) {
                 console.log(`等待 2 秒后重试...`);
